@@ -12,10 +12,4 @@ export default defineConfig({
     host: 'localhost',
     port: 3000,
   },
-  resolve: {
-    alias: {
-      '@medplum/core': path.resolve(__dirname, '../../packages/core/src'),
-      '@medplum/react': path.resolve(__dirname, '../../packages/react/src'),
-    },
-  },
 });
