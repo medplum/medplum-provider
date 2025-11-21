@@ -19,7 +19,7 @@ import { Loading, useMedplum, useMedplumProfile, useResource } from '@medplum/re
 import { IconCheck, IconTrash } from '@tabler/icons-react';
 import React, { useState } from 'react';
 import { showErrorNotification } from '../../utils/notifications';
-import { TaskQuestionnaireForm } from '../encountertasks/TaskQuestionnaireForm';
+import { TaskQuestionnaireForm } from './encounter/TaskQuestionnaireForm';
 import { useDebouncedUpdateResource } from '../../hooks/useDebouncedUpdateResource';
 import { TaskNoteItem } from './TaskNoteItem';
 import { useDebouncedCallback } from '@mantine/hooks';
@@ -137,18 +137,20 @@ export function TaskInputNote(props: TaskInputNoteProps): React.JSX.Element {
 
           {allowEdit && (
             <Flex align="center" gap="md">
-              <ActionIcon
-                variant="outline"
-                c="dimmed"
-                color="gray"
-                aria-label="Delete Task"
-                radius="xl"
-                w={36}
-                h={36}
-                onClick={() => handleDeleteTask()}
-              >
-                <IconTrash size={24} />
-              </ActionIcon>
+              {onDeleteTask && (
+                <ActionIcon
+                  variant="outline"
+                  c="dimmed"
+                  color="gray"
+                  aria-label="Delete Task"
+                  radius="xl"
+                  w={36}
+                  h={36}
+                  onClick={() => handleDeleteTask()}
+                >
+                  <IconTrash size={24} />
+                </ActionIcon>
+              )}
 
               <ActionIcon
                 variant={task.status === 'completed' ? 'filled' : 'outline'}
