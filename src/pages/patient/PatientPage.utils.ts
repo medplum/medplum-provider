@@ -43,7 +43,7 @@ export const PatientPageTabs: PatientPageTabInfo[] = [
   },
   {
     id: 'tasks',
-    url: 'Task?_fields=_lastUpdated,code,status,focus&_offset=0&_sort=-_lastUpdated&patient=%patient.id',
+    url: 'Task',
     label: 'Tasks',
   },
   {
@@ -71,7 +71,7 @@ export const PatientPageTabs: PatientPageTabInfo[] = [
     url: 'CarePlan?_fields=_lastUpdated,status,intent,category,period&_sort=-_lastUpdated&patient=%patient.id',
     label: 'Care Plans',
   },
-  { id: 'message', url: 'Message', label: 'Messages' },
+  { id: 'message', url: 'Communication', label: 'Messages' },
   { id: 'dosespot', url: 'dosespot', label: 'DoseSpot' },
   { id: 'export', url: 'export', label: 'Export' },
 ];
