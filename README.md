@@ -1,10 +1,14 @@
-<h1 align="center">Medplum Provider</h1>
-<p align="center">A starter application for building a health record system on Medplum.</p>
+<h1 align="center">Luminai EHR</h1>
+<p align="center">An EHR that mimics Epic, built off of a starter application for building a health record system on Medplum.</p>
 <p align="center">
 <a href="https://github.com/medplum/medplum-hello-world/blob/main/LICENSE.txt">
     <img src="https://img.shields.io/badge/license-Apache-blue.svg" />
   </a>
 </p>
+
+Sanjay note: I've created this repo on top of the medplum-provider repo to see if we can mimic a real EHR. Will let the team take from here. 
+
+--
 
 This example app demonstrates the following:
 
