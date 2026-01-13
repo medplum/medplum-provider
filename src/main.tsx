@@ -12,6 +12,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createBrowserRouter } from 'react-router';
 import { App } from './App';
+import './epic-styles.css';
 
 const medplum = new MedplumClient({
   onUnauthenticated: () => (window.location.href = '/'),
@@ -21,21 +22,112 @@ const medplum = new MedplumClient({
 });
 
 const theme = createTheme({
+  fontFamily: 'Arial, Helvetica, sans-serif',
+  fontFamilyMonospace: 'Courier New, monospace',
   headings: {
+    fontFamily: 'Arial, Helvetica, sans-serif',
     sizes: {
       h1: {
         fontSize: '1.125rem',
-        fontWeight: '500',
-        lineHeight: '2.0',
+        fontWeight: '600',
+        lineHeight: '1.5',
+      },
+      h2: {
+        fontSize: '1rem',
+        fontWeight: '600',
+        lineHeight: '1.5',
+      },
+      h3: {
+        fontSize: '0.9375rem',
+        fontWeight: '600',
+        lineHeight: '1.5',
       },
     },
   },
   fontSizes: {
     xs: '0.6875rem',
-    sm: '0.875rem',
-    md: '0.875rem',
-    lg: '1.0rem',
+    sm: '0.8125rem',
+    md: '0.8125rem',
+    lg: '1rem',
     xl: '1.125rem',
+  },
+  primaryColor: 'blue',
+  colors: {
+    blue: [
+      '#E3F2FD',
+      '#BBDEFB',
+      '#90CAF9',
+      '#64B5F6',
+      '#42A5F5',
+      '#4A90E2', // Epic blue
+      '#357ABD', // Epic blue dark
+      '#1976D2',
+      '#1565C0',
+      '#0D47A1',
+    ],
+  },
+  defaultRadius: 'sm',
+  radius: {
+    xs: '2px',
+    sm: '3px',
+    md: '4px',
+    lg: '6px',
+    xl: '8px',
+  },
+  components: {
+    Button: {
+      defaultProps: {
+        size: 'sm',
+      },
+      styles: {
+        root: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '13px',
+        },
+      },
+    },
+    TextInput: {
+      styles: {
+        input: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '13px',
+        },
+        label: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '12px',
+          fontWeight: 600,
+        },
+      },
+    },
+    Select: {
+      styles: {
+        input: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '13px',
+        },
+        label: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '12px',
+          fontWeight: 600,
+        },
+      },
+    },
+    Table: {
+      styles: {
+        root: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '13px',
+        },
+      },
+    },
+    Tabs: {
+      styles: {
+        tab: {
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '13px',
+        },
+      },
+    },
   },
 });
 

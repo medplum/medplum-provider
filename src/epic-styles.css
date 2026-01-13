@@ -1,0 +1,708 @@
+/* Epic EHR Style Overrides */
+
+/* Epic Color Palette */
+:root {
+  --epic-blue: #4A90E2;
+  --epic-blue-dark: #357ABD;
+  --epic-blue-light: #6BA3E8;
+  --epic-gray-light: #F5F5F5;
+  --epic-gray: #E0E0E0;
+  --epic-gray-dark: #CCCCCC;
+  --epic-text: #333333;
+  --epic-text-light: #666666;
+  --epic-white: #FFFFFF;
+  --epic-border: #D0D0D0;
+  --epic-shadow: rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure body and root use Epic background */
+html,
+body,
+#root {
+  background-color: var(--epic-gray-light) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+/* Global Font Settings - Epic uses Arial/Helvetica */
+* {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px;
+  color: var(--epic-text);
+  background-color: var(--epic-gray-light);
+  margin: 0;
+  padding: 0;
+}
+
+/* AppShell Header - Epic Light Blue Header */
+[data-mantine-color-scheme] .mantine-AppShell-header,
+.mantine-AppShell-header {
+  background-color: var(--epic-blue) !important;
+  border-bottom: 1px solid var(--epic-blue-dark) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  max-height: 48px !important;
+  padding: 0 12px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Header Content */
+.mantine-AppShell-header > div,
+.mantine-AppShell-header > * {
+  display: flex !important;
+  align-items: center !important;
+  height: 100% !important;
+  color: white !important;
+  width: 100% !important;
+}
+
+/* Logo in Header */
+.mantine-AppShell-header svg,
+.mantine-AppShell-header img {
+  filter: brightness(0) invert(1) !important;
+}
+
+/* Header Text and Links */
+.mantine-AppShell-header a,
+.mantine-AppShell-header button,
+.mantine-AppShell-header span,
+.mantine-AppShell-header div {
+  color: white !important;
+}
+
+/* Header Navigation Links */
+.mantine-AppShell-header .mantine-NavLink-root {
+  color: white !important;
+  padding: 8px 12px !important;
+  border-radius: 3px !important;
+}
+
+.mantine-AppShell-header .mantine-NavLink-root:hover {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.mantine-AppShell-header .mantine-NavLink-root[data-active="true"] {
+  background-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Navigation Menu Items */
+.mantine-NavLink-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  color: var(--epic-text) !important;
+  padding: 8px 12px !important;
+  border-radius: 0 !important;
+  transition: background-color 0.15s ease !important;
+}
+
+.mantine-NavLink-root:hover {
+  background-color: var(--epic-gray) !important;
+}
+
+.mantine-NavLink-root[data-active="true"] {
+  background-color: var(--epic-blue) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+.mantine-NavLink-root[data-active="true"] .mantine-NavLink-label {
+  color: white !important;
+}
+
+/* Sidebar Navigation */
+.mantine-AppShell-navbar {
+  background-color: var(--epic-white) !important;
+  border-right: 1px solid var(--epic-border) !important;
+  width: 200px !important;
+  padding: 0 !important;
+}
+
+.mantine-AppShell-navbar .mantine-NavLink-root {
+  border-bottom: 1px solid var(--epic-gray) !important;
+  margin: 0 !important;
+}
+
+.mantine-AppShell-navbar .mantine-NavLink-root:last-child {
+  border-bottom: none !important;
+}
+
+/* Navigation Section Titles */
+.mantine-NavLink-section-label {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: var(--epic-text-light) !important;
+  padding: 12px 12px 6px 12px !important;
+  margin-top: 8px !important;
+}
+
+/* Main Content Area */
+.mantine-AppShell-main {
+  background-color: var(--epic-gray-light) !important;
+  padding: 0 !important;
+}
+
+/* Buttons - Epic Style */
+.mantine-Button-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border-radius: 3px !important;
+  padding: 6px 12px !important;
+}
+
+.mantine-Button-filled {
+  background-color: var(--epic-blue) !important;
+  border-color: var(--epic-blue-dark) !important;
+}
+
+.mantine-Button-filled:hover {
+  background-color: var(--epic-blue-dark) !important;
+}
+
+/* Input Fields */
+.mantine-Input-input,
+.mantine-TextInput-input,
+.mantine-Textarea-input,
+.mantine-Select-input {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border: 1px solid var(--epic-border) !important;
+  border-radius: 3px !important;
+  padding: 6px 8px !important;
+}
+
+.mantine-Input-input:focus,
+.mantine-TextInput-input:focus,
+.mantine-Textarea-input:focus,
+.mantine-Select-input:focus {
+  border-color: var(--epic-blue) !important;
+  outline: 1px solid var(--epic-blue) !important;
+}
+
+/* Tables */
+.mantine-Table-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border: 1px solid var(--epic-border) !important;
+}
+
+.mantine-Table-thead {
+  background-color: var(--epic-gray) !important;
+}
+
+.mantine-Table-th {
+  font-weight: 600 !important;
+  padding: 8px !important;
+  border-bottom: 2px solid var(--epic-border) !important;
+}
+
+.mantine-Table-td {
+  padding: 8px !important;
+  border-bottom: 1px solid var(--epic-gray) !important;
+}
+
+.mantine-Table-tr:hover {
+  background-color: var(--epic-gray-light) !important;
+}
+
+/* Cards and Panels */
+.mantine-Paper-root,
+.mantine-Card-root {
+  background-color: var(--epic-white) !important;
+  border: 1px solid var(--epic-border) !important;
+  border-radius: 3px !important;
+  box-shadow: 0 1px 2px var(--epic-shadow) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+.mantine-Card-section {
+  padding: 12px 16px !important;
+}
+
+.mantine-Card-header {
+  background-color: var(--epic-gray-light) !important;
+  border-bottom: 1px solid var(--epic-border) !important;
+  padding: 10px 16px !important;
+  font-weight: 600 !important;
+}
+
+/* Tabs */
+.mantine-Tabs-list {
+  border-bottom: 2px solid var(--epic-border) !important;
+  background-color: var(--epic-white) !important;
+}
+
+.mantine-Tabs-tab {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  padding: 8px 16px !important;
+  color: var(--epic-text) !important;
+  border-bottom: 2px solid transparent !important;
+}
+
+.mantine-Tabs-tab:hover {
+  background-color: var(--epic-gray-light) !important;
+}
+
+.mantine-Tabs-tab[data-active="true"] {
+  color: var(--epic-blue) !important;
+  border-bottom-color: var(--epic-blue) !important;
+  font-weight: 600 !important;
+}
+
+/* Modals */
+.mantine-Modal-header {
+  background-color: var(--epic-blue) !important;
+  color: white !important;
+  padding: 12px 16px !important;
+  border-bottom: 1px solid var(--epic-blue-dark) !important;
+  border-radius: 3px 3px 0 0 !important;
+}
+
+.mantine-Modal-title {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: white !important;
+}
+
+.mantine-Modal-close {
+  color: white !important;
+}
+
+.mantine-Modal-close:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.mantine-Modal-content {
+  border-radius: 3px !important;
+  overflow: hidden !important;
+  border: 1px solid var(--epic-border) !important;
+  box-shadow: 0 4px 12px var(--epic-shadow) !important;
+}
+
+.mantine-Modal-body {
+  padding: 16px !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  background-color: var(--epic-white) !important;
+}
+
+/* Badges and Notifications */
+.mantine-Badge-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 11px !important;
+  border-radius: 3px !important;
+  padding: 2px 6px !important;
+}
+
+.mantine-Notification-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border-radius: 3px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Patient Summary and Sidebar */
+.mantine-PatientSummary-root {
+  background-color: var(--epic-white) !important;
+  border-right: 1px solid var(--epic-border) !important;
+}
+
+/* Scrollbars - Epic Style */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--epic-gray-light);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--epic-gray-dark);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--epic-gray);
+}
+
+/* Links */
+a {
+  color: var(--epic-blue) !important;
+  text-decoration: none !important;
+}
+
+a:hover {
+  color: var(--epic-blue-dark) !important;
+  text-decoration: underline !important;
+}
+
+/* Patient Page Layout */
+.patient-page-container {
+  display: flex;
+  flex-direction: row;
+  height: calc(100vh - 48px);
+  background-color: var(--epic-gray-light);
+}
+
+.patient-sidebar {
+  width: 350px;
+  background-color: var(--epic-white);
+  border-right: 1px solid var(--epic-border);
+  overflow-y: auto;
+}
+
+.patient-content {
+  flex: 1;
+  background-color: var(--epic-white);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* Encounter Chart Styling */
+.encounter-chart {
+  background-color: var(--epic-white);
+  border: 1px solid var(--epic-border);
+  border-radius: 3px;
+}
+
+/* Forms */
+.mantine-Input-label,
+.mantine-TextInput-label,
+.mantine-Select-label {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--epic-text) !important;
+  margin-bottom: 4px !important;
+}
+
+/* Dropdowns */
+.mantine-Select-dropdown,
+.mantine-Menu-dropdown {
+  border: 1px solid var(--epic-border) !important;
+  border-radius: 3px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.mantine-Menu-item {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  padding: 8px 12px !important;
+}
+
+.mantine-Menu-item:hover {
+  background-color: var(--epic-gray-light) !important;
+}
+
+/* Loading Spinners */
+.mantine-Loader-root {
+  color: var(--epic-blue) !important;
+}
+
+/* Checkboxes and Radio Buttons */
+.mantine-Checkbox-input,
+.mantine-Radio-input {
+  border-color: var(--epic-border) !important;
+}
+
+.mantine-Checkbox-input:checked,
+.mantine-Radio-input:checked {
+  background-color: var(--epic-blue) !important;
+  border-color: var(--epic-blue) !important;
+}
+
+/* Search Input */
+.mantine-TextInput-input[type="search"] {
+  border-radius: 3px !important;
+}
+
+/* Notification Icons in Header */
+.mantine-AppShell-header .mantine-ActionIcon-root {
+  color: white !important;
+}
+
+.mantine-AppShell-header .mantine-ActionIcon-root:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Breadcrumbs */
+.mantine-Breadcrumbs-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+.mantine-Breadcrumbs-separator {
+  color: var(--epic-text-light) !important;
+}
+
+/* Tooltips */
+.mantine-Tooltip-tooltip {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 12px !important;
+  background-color: var(--epic-text) !important;
+  color: white !important;
+  border-radius: 3px !important;
+  padding: 6px 8px !important;
+}
+
+/* Patient Banner Style (if exists) */
+.patient-banner,
+[class*="PatientBanner"],
+[class*="PatientHeader"] {
+  background-color: var(--epic-white) !important;
+  border-bottom: 2px solid var(--epic-blue) !important;
+  padding: 12px 16px !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  box-shadow: 0 2px 4px var(--epic-shadow) !important;
+}
+
+/* Encounter Header */
+[class*="EncounterHeader"] {
+  background-color: var(--epic-white) !important;
+  border-bottom: 1px solid var(--epic-border) !important;
+  padding: 12px 16px !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+/* Form Fields Group */
+.mantine-InputWrapper-root {
+  margin-bottom: 12px !important;
+}
+
+/* Select Dropdown Items */
+.mantine-Select-item,
+.mantine-Menu-item {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  padding: 8px 12px !important;
+}
+
+.mantine-Select-item:hover,
+.mantine-Menu-item:hover {
+  background-color: var(--epic-gray-light) !important;
+}
+
+.mantine-Select-item[data-selected="true"],
+.mantine-Menu-item[data-selected="true"] {
+  background-color: var(--epic-blue) !important;
+  color: white !important;
+}
+
+/* Loading States */
+.mantine-Skeleton-root {
+  background-color: var(--epic-gray) !important;
+  border-radius: 3px !important;
+}
+
+/* Empty States */
+.mantine-EmptyState-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  color: var(--epic-text-light) !important;
+}
+
+/* Timeline and Activity Feeds */
+[class*="Timeline"],
+[class*="Activity"] {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* Status Badges */
+.mantine-Badge-root[data-status="active"],
+.mantine-Badge-root[data-status="completed"] {
+  background-color: #4CAF50 !important;
+  color: white !important;
+}
+
+.mantine-Badge-root[data-status="pending"],
+.mantine-Badge-root[data-status="in-progress"] {
+  background-color: #FF9800 !important;
+  color: white !important;
+}
+
+.mantine-Badge-root[data-status="cancelled"],
+.mantine-Badge-root[data-status="error"] {
+  background-color: #F44336 !important;
+  color: white !important;
+}
+
+/* Action Icons in Header */
+.mantine-AppShell-header .mantine-ActionIcon-root {
+  color: white !important;
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.mantine-AppShell-header .mantine-ActionIcon-root:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+}
+
+/* Notification Badges in Header */
+.mantine-AppShell-header .mantine-Badge-root {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+/* Search Bar in Header */
+.mantine-AppShell-header .mantine-TextInput-input {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: white !important;
+}
+
+.mantine-AppShell-header .mantine-TextInput-input::placeholder {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.mantine-AppShell-header .mantine-TextInput-input:focus {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Patient Summary Component */
+.mantine-PatientSummary-root,
+[class*="PatientSummary"] {
+  background-color: var(--epic-white) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* Encounter Chart Styling */
+.encounter-chart,
+[class*="EncounterChart"] {
+  background-color: var(--epic-white) !important;
+  border: 1px solid var(--epic-border) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+/* Task Board and Lists */
+.mantine-TaskBoard-root,
+[class*="TaskBoard"],
+[class*="TaskList"] {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* Lab Results */
+[class*="LabResult"],
+[class*="LabOrder"] {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border: 1px solid var(--epic-border) !important;
+  background-color: var(--epic-white) !important;
+}
+
+/* Messages and Communication */
+[class*="Message"],
+[class*="Communication"],
+[class*="Chat"] {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* Schedule/Calendar */
+.rbc-header {
+  background-color: var(--epic-gray) !important;
+  border-bottom: 2px solid var(--epic-border) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+}
+
+.rbc-today {
+  background-color: var(--epic-gray-light) !important;
+}
+
+.rbc-event {
+  background-color: var(--epic-blue) !important;
+  border-color: var(--epic-blue-dark) !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 12px !important;
+}
+
+.rbc-event:focus {
+  outline: 2px solid var(--epic-blue-dark) !important;
+}
+
+/* Data Tables */
+.mantine-DataTable-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+}
+
+.mantine-DataTable-header {
+  background-color: var(--epic-gray) !important;
+  font-weight: 600 !important;
+}
+
+/* Alert/Notification Messages */
+.mantine-Alert-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 13px !important;
+  border-radius: 3px !important;
+  border: 1px solid var(--epic-border) !important;
+}
+
+.mantine-Alert-title {
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+}
+
+/* Progress Bars */
+.mantine-Progress-root {
+  background-color: var(--epic-gray) !important;
+  border-radius: 3px !important;
+}
+
+.mantine-Progress-bar {
+  background-color: var(--epic-blue) !important;
+}
+
+/* Dividers */
+.mantine-Divider-root {
+  border-color: var(--epic-border) !important;
+}
+
+/* Stack and Group Components */
+.mantine-Stack-root,
+.mantine-Group-root {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+/* Override any dark mode styles */
+[data-mantine-color-scheme="dark"] {
+  color-scheme: light !important;
+}
+
+[data-mantine-color-scheme="dark"] .mantine-AppShell-header {
+  background-color: var(--epic-blue) !important;
+}
+
+[data-mantine-color-scheme="dark"] .mantine-AppShell-navbar {
+  background-color: var(--epic-white) !important;
+}
+
+[data-mantine-color-scheme="dark"] .mantine-AppShell-main {
+  background-color: var(--epic-gray-light) !important;
+}
+
+[data-mantine-color-scheme="dark"] .mantine-Paper-root,
+[data-mantine-color-scheme="dark"] .mantine-Card-root {
+  background-color: var(--epic-white) !important;
+  color: var(--epic-text) !important;
+}
+
