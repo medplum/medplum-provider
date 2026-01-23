@@ -3,6 +3,7 @@
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import type { Communication } from '@medplum/fhirtypes';
+import type { WithId } from '@medplum/core';
 import { HomerSimpson, MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -10,13 +11,20 @@ import { MemoryRouter } from 'react-router';
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { MessagesPage } from './MessagesPage';
 
+vi.mock('@medplum/react-hooks', async () => {
+  const actual = await vi.importActual('@medplum/react-hooks');
+  return {
+    ...actual,
+    useSubscription: vi.fn(),
+  };
+});
+
 describe('MessagesPage', () => {
   let medplum: MockClient;
 
   beforeEach(async () => {
     medplum = new MockClient();
     vi.clearAllMocks();
-    await medplum.createResource(HomerSimpson);
   });
 
   const setup = (messageId?: string): void => {
@@ -37,7 +45,7 @@ describe('MessagesPage', () => {
     setup();
 
     await waitFor(() => {
-      expect(screen.getByText('Messages')).toBeInTheDocument();
+      expect(screen.getByText('In progress')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Select a message from the list to view details')).toBeInTheDocument();
@@ -52,9 +60,6 @@ describe('MessagesPage', () => {
       subject: { reference: `Patient/${HomerSimpson.id}` },
     };
 
-    await medplum.createResource(mockCommunication);
-
-    // Create a last message for the thread
     const lastMessage: Communication = {
       resourceType: 'Communication',
       id: 'last-msg-123',
@@ -63,19 +68,27 @@ describe('MessagesPage', () => {
       sent: '2024-01-01T12:00:00Z',
       payload: [{ contentString: 'Last message' }],
     };
-    await medplum.createResource(lastMessage);
 
-    medplum.graphql = vi.fn().mockResolvedValue({
+    vi.spyOn(medplum, 'search').mockResolvedValue({
+      resourceType: 'Bundle',
+      type: 'searchset',
+      total: 1,
+      entry: [{ resource: mockCommunication as WithId<Communication> }],
+    });
+
+    vi.spyOn(medplum, 'graphql').mockResolvedValue({
       data: {
         thread_comm123: [lastMessage],
       },
-    });
+    } as any);
+
+    vi.spyOn(medplum, 'readResource').mockResolvedValue(mockCommunication as WithId<Communication>);
 
     setup('comm-123');
 
     await waitFor(
       () => {
-        expect(screen.getByText('Messages')).toBeInTheDocument();
+        expect(screen.getByText('In progress')).toBeInTheDocument();
       },
       { timeout: 3000 }
     );
