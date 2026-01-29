@@ -1,0 +1,17 @@
+.item {
+  transition: background-color 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.item:hover {
+  background-color: var(--mantine-color-gray-0);
+}
+
+.selected {
+  background-color: var(--mantine-color-blue-0);
+  border: 1px solid var(--mantine-color-blue-3);
+}
+
+.selected:hover {
+  background-color: var(--mantine-color-blue-1);
+}

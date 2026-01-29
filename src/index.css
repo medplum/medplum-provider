@@ -1,6 +1,25 @@
+/* Global: Pin the navigation sidebar and prevent collapsing */
+.mantine-AppShell-navbar {
+  width: 10%;
+  min-width:10%;
+  transition: none;
+}
+
+/* Adjust main content area to not be obscured by pinned sidebar */
+.mantine-AppShell-main {
+  margin-left:10%;
+}
+
+/* Disable logo click to prevent sidebar collapse */
+.Navbar_logoButton {
+  pointer-events: none !important;
+  cursor: default !important;
+}
+
 .rbc-calendar {
   font-family: Arial, Helvetica, sans-serif !important;
 }
+
 
 .rbc-btn-group button {
   font-size: 13px !important;

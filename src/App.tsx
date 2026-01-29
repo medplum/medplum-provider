@@ -5,7 +5,6 @@ import { getReferenceString } from '@medplum/core';
 import {
   AppShell,
   Loading,
-  Logo,
   NotificationIcon,
   useMedplum,
   useMedplumNavigate,
@@ -19,6 +18,7 @@ import {
   IconPuzzle,
   IconTransformPoint,
   IconUser,
+  IconStethoscope,
 } from '@tabler/icons-react';
 import type { JSX } from 'react';
 import { Suspense } from 'react';
@@ -52,6 +52,7 @@ import { SearchPage } from './pages/SearchPage';
 import { SignInPage } from './pages/SignInPage';
 import { SpacesPage } from './pages/spaces/SpacesPage';
 import { TasksPage } from './pages/tasks/TasksPage';
+import { ReferralsPage } from './pages/referrals/ReferralsPage';
 
 export function App(): JSX.Element | null {
   const medplum = useMedplum();
@@ -69,7 +70,7 @@ export function App(): JSX.Element | null {
 
   return (
     <AppShell
-      logo={<Logo size={24} />}
+      logo={<img src="/red_luminai.svg" alt="LuminAI Logo" style={{ height: '24px', width: 'auto' }} />}
       pathname={location.pathname}
       searchParams={searchParams}
       menus={
@@ -83,7 +84,13 @@ export function App(): JSX.Element | null {
                     label: 'Patients',
                     href: '/Patient?_count=20&_fields=name,email,gender&_sort=-_lastUpdated',
                   },
+                  {
+                    icon: <IconStethoscope />,
+                    label: 'Practitioners',
+                    href: '/Practitioner?_count=20&_fields=name,qualification,telecom&_sort=-_lastUpdated',
+                  },
                   { icon: <IconCalendarMonth />, label: 'Schedule', href: '/schedule' },
+                  { icon: <IconTransformPoint />, label: 'Referrals', href: '/referrals' },
                   {
                     icon: (
                       <NotificationIcon
@@ -189,6 +196,8 @@ export function App(): JSX.Element | null {
               <Route path="Task/:taskId" element={<TasksPage />} />
               <Route path="/onboarding" element={<IntakeFormPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
+              <Route path="/referrals" element={<ReferralsPage />} />
+              <Route path="/referrals/:serviceRequestId" element={<ReferralsPage />} />
               <Route path="/signin" element={<SignInPage />} />
               <Route path="/dosespot" element={<DoseSpotTab />} />
               <Route path="/integrations" element={<IntegrationsPage />} />
