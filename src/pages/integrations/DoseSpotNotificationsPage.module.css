@@ -1,13 +1,17 @@
 .container {
-  height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  flex: 1;
+  height: calc(100vh - var(--app-shell-header-height, 0));
 }
 
-.rightBorder {
-  border-right: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-gray-8));
+.tabBar {
+  flex-shrink: 0;
+  border-bottom: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+}
+
+.iframeContainer {
+  flex: 1;
+  min-height: 0;
 }
 
 .button {
