@@ -11,7 +11,7 @@ import { showErrorNotification } from '../../utils/notifications';
 
 type IntakeStep = 'cle16' | 'cle287' | 'done';
 
-// Only Charlie Brown's referral supports the full intake workflow in this demo
+// Only Kim Tran's referral supports the full intake workflow in this demo
 const INTAKE_BUNDLE_ID = 'ereferral-cb';
 
 function findBundleResource<T>(bundle: Bundle, resourceType: string): T | undefined {
@@ -209,7 +209,7 @@ export function ReferralDetailPage(): JSX.Element {
         });
       }
 
-      // Mark the intake bundle as processed (always the Charlie Brown bundle)
+      // Mark the intake bundle as processed (always the Kim Tran bundle)
       try {
         const cbBundle = await medplum.readResource('Bundle', INTAKE_BUNDLE_ID);
         await medplum.updateResource({
@@ -266,7 +266,7 @@ export function ReferralDetailPage(): JSX.Element {
 
           {!isProcessed && (
             <Alert color="blue" title="Demo Note">
-              In the full application, intake forms would be completed here. In this demo, use Charlie Brown&apos;s referral to experience the full intake workflow.
+              In the full application, intake forms would be completed here. In this demo, use Kim Tran&apos;s referral to experience the full intake workflow.
             </Alert>
           )}
         </Stack>

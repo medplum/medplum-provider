@@ -1,7 +1,7 @@
 /**
- * Seeds Homer Simpson as a fully active patient during Phase 1.
+ * Seeds Aneesh Patel as a fully active patient during Phase 1.
  *
- * Homer has a completed diabetic foot ulcer episode from the
+ * Aneesh has a completed diabetic foot ulcer episode from the
  * homer-simpson/bundle.json test data. We re-use that data but:
  *   - Change statuses to "active" so it looks like an ongoing episode
  *   - Date-adjust encounters/appointments relative to today
@@ -40,7 +40,7 @@ function extractResource<T>(resourceType: string, id: string): T {
     (e: BundleEntry) => e.resource?.resourceType === resourceType && e.resource?.id === id
   );
   if (!entry?.resource) {
-    throw new Error(`Homer seed data missing: ${resourceType}/${id}`);
+    throw new Error(`Aneesh Patel seed data missing: ${resourceType}/${id}`);
   }
   return JSON.parse(JSON.stringify(entry.resource)) as T;
 }

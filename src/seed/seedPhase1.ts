@@ -1,14 +1,14 @@
 /**
  * Phase 1 Seed — loaded on app start.
  *
- * Seeds infrastructure resources and one fully active patient (Homer Simpson):
+ * Seeds infrastructure resources and one fully active patient (Aneesh Patel):
  *   - Organizations (from both bundles)
  *   - Practitioners (from both bundles)
  *   - PlanDefinition (wound care template)
  *   - All Questionnaires (CLE forms)
- *   - Homer Simpson: fully active patient with appointments, care plan, etc.
- *   - eReferral message Bundles (Homer=processed, Charlie Brown=pending, Eleanor Rigby=pending)
- *   - Charlie Brown Intake Tasks (CLE16 ready, CLE287 requested)
+ *   - Aneesh Patel: fully active patient with appointments, care plan, etc.
+ *   - eReferral message Bundles (Aneesh=processed, Kim Tran=pending, Amina Farah=pending)
+ *   - Kim Tran Intake Tasks (CLE16 ready, CLE287 requested)
  */
 import type { MedplumClient } from '@medplum/core';
 import type {
@@ -61,7 +61,7 @@ const allQuestionnaires: Questionnaire[] = [
   qCle31, qCle34, qCle35, qCle52, qCle75, qCle83,
 ] as unknown as Questionnaire[];
 
-/** Helper to extract a resource by ID from the Charlie Brown transaction bundle */
+/** Helper to extract a resource by ID from the Kim Tran transaction bundle */
 function extractCBResource<T>(resourceType: string, id: string): T {
   const bundle = charlieBrownBundle as Bundle;
   const entry = bundle.entry?.find(
@@ -73,7 +73,7 @@ function extractCBResource<T>(resourceType: string, id: string): T {
   return entry.resource as T;
 }
 
-/** Extract all resources of a given type from the Charlie Brown bundle */
+/** Extract all resources of a given type from the Kim Tran bundle */
 function extractCBAllOfType<T>(resourceType: string): T[] {
   const bundle = charlieBrownBundle as Bundle;
   return (bundle.entry || [])
@@ -81,14 +81,14 @@ function extractCBAllOfType<T>(resourceType: string): T[] {
     .map((e: BundleEntry) => e.resource as T);
 }
 
-/** Extract a resource from the Homer Simpson bundle */
+/** Extract a resource from the Aneesh Patel bundle */
 function extractHSResource<T>(resourceType: string, id: string): T {
   const bundle = homerBundle as Bundle;
   const entry = bundle.entry?.find(
     (e: BundleEntry) => e.resource?.resourceType === resourceType && e.resource?.id === id
   );
   if (!entry?.resource) {
-    throw new Error(`Homer seed data missing: ${resourceType}/${id}`);
+    throw new Error(`Aneesh Patel seed data missing: ${resourceType}/${id}`);
   }
   return JSON.parse(JSON.stringify(entry.resource)) as T;
 }
@@ -105,7 +105,7 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
     seenOrgIds.add(org.id || '');
     await medplum.createResource(org);
   }
-  // Homer bundle has additional orgs (bayshore-hhp-toronto-east)
+  // Aneesh Patel bundle has additional orgs (bayshore-hhp-toronto-east)
   const hsOrgs = (homerBundle as Bundle).entry
     ?.filter((e: BundleEntry) => e.resource?.resourceType === 'Organization')
     .map((e: BundleEntry) => e.resource as Organization) || [];
@@ -122,7 +122,7 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
     seenPractIds.add(pract.id || '');
     await medplum.createResource(pract);
   }
-  // Homer bundle has additional practitioners (dr-hibbert, nurse-mills, nurse-resource-chen)
+  // Aneesh Patel bundle has additional practitioners (dr-hibbert, nurse-mills, nurse-resource-chen)
   const hsPracts = (homerBundle as Bundle).entry
     ?.filter((e: BundleEntry) => e.resource?.resourceType === 'Practitioner')
     .map((e: BundleEntry) => e.resource as Practitioner) || [];
@@ -132,16 +132,28 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
     }
   }
 
-  // 2b. Demo Practitioner: Branch Coordinator (for RoleSwitcher profile)
+  // 2b. Demo Practitioner: Branch Manager (for auto-switching persona)
   const coordinator: Practitioner = {
     resourceType: 'Practitioner',
     id: 'coordinator-anderson',
-    name: [{ given: ['Sarah'], family: 'Anderson', prefix: ['Ms.'] }],
+    name: [{ given: ['Priya'], family: 'Sharma', prefix: ['Ms.'] }],
     identifier: [{ system: 'https://bayshore.ca/fhir/Practitioner', value: 'COORD-001' }],
-    qualification: [{ code: { text: 'Branch Coordinator' } }],
+    qualification: [{ code: { text: 'Branch Manager' } }],
   };
   if (!seenPractIds.has('coordinator-anderson')) {
     await medplum.createResource(coordinator);
+  }
+
+  // 2c. Demo Practitioner: Clinical Content Knowledge Manager
+  const contentManager: Practitioner = {
+    resourceType: 'Practitioner',
+    id: 'content-manager-okafor',
+    name: [{ given: ['David'], family: 'Okafor' }],
+    identifier: [{ system: 'https://bayshore.ca/fhir/Practitioner', value: 'CCM-001' }],
+    qualification: [{ code: { text: 'Clinical Content Knowledge Manager' } }],
+  };
+  if (!seenPractIds.has('content-manager-okafor')) {
+    await medplum.createResource(contentManager);
   }
 
   // 3. PlanDefinition
@@ -152,12 +164,12 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
     await medplum.createResource(q);
   }
 
-  // 5. Seed Homer Simpson as a fully active patient
+  // 5. Seed Aneesh Patel as a fully active patient
   await seedHomerSimpson(medplum);
 
   // 6. eReferral message Bundles
 
-  // 6a. Homer Simpson — already processed (active client)
+  // 6a. Aneesh Patel — already processed (active client)
   const homerPatient = extractHSResource<Patient>('Patient', 'patient-homer-simpson');
   const drHibbert = extractHSResource<Practitioner>('Practitioner', 'dr-hibbert');
   const homerSR = extractHSResource<ServiceRequest>('ServiceRequest', 'sr-wound-care-hs');
@@ -191,7 +203,7 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
   };
   await medplum.createResource(eReferralHomer);
 
-  // 6b. Charlie Brown — pending intake
+  // 6b. Kim Tran — pending intake
   const cbPatient = extractCBResource<Patient>('Patient', 'patient-charlie-brown');
   const drAlpha = extractCBResource<Practitioner>('Practitioner', 'dr-alpha');
   const cbSR = extractCBResource<ServiceRequest>('ServiceRequest', 'sr-wound-care-cb');
@@ -224,7 +236,7 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
   };
   await medplum.createResource(eReferralCB);
 
-  // 6c. Eleanor Rigby — pending referral (fabricated, gives queue 3 rows)
+  // 6c. Amina Farah — pending referral (fabricated, gives queue 3 rows)
   const eReferralER: Bundle = {
     resourceType: 'Bundle',
     id: 'ereferral-er',
@@ -248,18 +260,18 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
         resource: {
           resourceType: 'Patient',
           id: 'patient-eleanor-rigby',
-          name: [{ family: 'Rigby', given: ['Eleanor'] }],
+          name: [{ family: 'Farah', given: ['Amina'] }],
           gender: 'female',
           birthDate: '1942-08-05',
-          address: [{ line: ['64 Penny Lane'], city: 'Liverpool', state: 'ON', postalCode: 'N5Y 1A4', country: 'CA' }],
-          telecom: [{ system: 'phone', value: '519-555-0164', use: 'home' }],
+          address: [{ line: ['64 Maple Crescent'], city: 'Hamilton', state: 'ON', postalCode: 'L8P 1A4', country: 'CA' }],
+          telecom: [{ system: 'phone', value: '905-555-0164', use: 'home' }],
         },
       },
       {
         resource: {
           resourceType: 'Practitioner',
           id: 'dr-mccartney',
-          name: [{ family: 'McCartney', given: ['Paul'], prefix: ['Dr.'] }],
+          name: [{ family: 'Al-Hassan', given: ['Fatima'], prefix: ['Dr.'] }],
         },
       },
       {
@@ -295,7 +307,7 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
   };
   await medplum.createResource(eReferralER);
 
-  // 7. Charlie Brown Intake Tasks
+  // 7. Kim Tran Intake Tasks
   const taskCle16: Task = {
     resourceType: 'Task',
     id: 'task-intake-cle16',

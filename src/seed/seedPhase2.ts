@@ -2,7 +2,7 @@
  * Phase 2 Seed — loaded after CLE16 intake form is submitted.
  *
  * "Explodes" the eReferral bundle into individual resources and seeds
- * all remaining clinical data for the Charlie Brown episode:
+ * all remaining clinical data for the Kim Tran episode:
  *   - Patient, ServiceRequest, Condition, BodyStructure
  *   - CarePlan, Goal
  *   - Appointments (date-adjusted)
@@ -73,7 +73,7 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
   if (!patient.telecom?.find((t) => t.system === 'email')) {
     patient.telecom = [
       ...(patient.telecom || []),
-      { system: 'email', value: 'charlie.brown@email.ca' },
+      { system: 'email', value: 'kim.tran@email.ca' },
     ];
   }
   await medplum.createResource(patient);
@@ -312,7 +312,7 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
     await medplum.createResource(mr);
   }
 
-  // 11c. AllergyIntolerance (NKDA for Charlie Brown)
+  // 11c. AllergyIntolerance (NKDA for Kim Tran)
   const allergyNKDA: AllergyIntolerance = {
     resourceType: 'AllergyIntolerance',
     clinicalStatus: {

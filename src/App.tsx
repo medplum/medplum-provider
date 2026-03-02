@@ -1,16 +1,16 @@
 import { AppShell, Loading, useMedplum } from '@medplum/react';
 import {
   IconCalendarEvent,
-  IconClipboardCheck,
   IconClipboardList,
   IconFileText,
   IconUsers,
 } from '@tabler/icons-react';
 import type { JSX } from 'react';
-import { Suspense } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router';
 import { BayshoreLogo } from './components/BayshoreLogo';
 import { RoleSwitcher } from './components/RoleSwitcher';
+import type { DemoRole } from './context/RoleContext';
 import { RoleProvider, useRole } from './context/RoleContext';
 import './index.css';
 
@@ -31,17 +31,44 @@ import { QuestionnairesPage } from './pages/questionnaires/QuestionnairesPage';
 import { NurseSchedulePage } from './pages/schedule/NurseSchedulePage';
 import { SearchPage } from './pages/SearchPage';
 
+const ROLE_PRACTITIONER_MAP: Record<DemoRole, string> = {
+  coordinator: 'coordinator-anderson',
+  nurse: 'nurse-ratched',
+  'content-manager': 'content-manager-okafor',
+};
+
+function getRoleForPath(pathname: string): DemoRole {
+  if (pathname.startsWith('/referrals')) return 'coordinator';
+  if (pathname.startsWith('/Patient') || pathname.startsWith('/nurse-schedule')) return 'nurse';
+  if (pathname.startsWith('/questionnaires')) return 'content-manager';
+  return 'coordinator';
+}
+
 function AppRoutes(): JSX.Element {
   const medplum = useMedplum();
-  const { role } = useRole();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { role, setRole } = useRole();
+  const lastRoleRef = useRef<DemoRole>(role);
+
+  // Auto-switch persona based on current route
+  useEffect(() => {
+    const newRole = getRoleForPath(location.pathname);
+    if (newRole !== lastRoleRef.current) {
+      lastRoleRef.current = newRole;
+      setRole(newRole);
+
+      // Switch practitioner profile so the AppShell header name updates
+      const practitionerId = ROLE_PRACTITIONER_MAP[newRole];
+      medplum.readResource('Practitioner', practitionerId).then((practitioner) => {
+        (medplum as any).setProfile(practitioner);
+      }).catch(console.error);
+    }
+  }, [location.pathname, medplum, setRole, role]);
 
   if (medplum.isLoading()) {
     return <Loading />;
   }
-
-  const defaultRoute = role === 'coordinator' ? '/referrals' : '/nurse-schedule';
 
   return (
     <AppShell
@@ -52,26 +79,16 @@ function AppRoutes(): JSX.Element {
       showLayoutVersionToggle={false}
       menus={[
         {
-          links: role === 'coordinator'
-            ? [
-                { icon: <IconFileText />, label: 'Referrals', href: '/referrals' },
-                {
-                  icon: <IconUsers />,
-                  label: 'Patients',
-                  href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
-                },
-                { icon: <IconCalendarEvent />, label: 'Schedule', href: '/nurse-schedule' },
-                { icon: <IconClipboardList />, label: 'Forms', href: '/questionnaires' },
-              ]
-            : [
-                { icon: <IconClipboardCheck />, label: 'My Schedule', href: '/nurse-schedule' },
-                {
-                  icon: <IconUsers />,
-                  label: 'Patients',
-                  href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
-                },
-                { icon: <IconClipboardList />, label: 'Forms', href: '/questionnaires' },
-              ],
+          links: [
+            { icon: <IconFileText />, label: 'Referrals', href: '/referrals' },
+            {
+              icon: <IconUsers />,
+              label: 'Patients',
+              href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
+            },
+            { icon: <IconCalendarEvent />, label: 'Schedule', href: '/nurse-schedule' },
+            { icon: <IconClipboardList />, label: 'Forms', href: '/questionnaires' },
+          ],
         },
       ]}
       resourceTypeSearchDisabled={true}
@@ -79,7 +96,7 @@ function AppRoutes(): JSX.Element {
     >
       <Suspense fallback={<Loading />}>
         <Routes>
-          <Route path="/" element={<Navigate to={defaultRoute} replace />} />
+          <Route path="/" element={<Navigate to="/referrals" replace />} />
 
           {/* Referral routes (coordinator) */}
           <Route path="/referrals" element={<ReferralQueuePage />} />
