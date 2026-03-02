@@ -270,6 +270,21 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
     woundObs.push(obs);
   }
 
+  // Smoking status (LOINC 72166-2)
+  const smokingObs: Observation = {
+    resourceType: 'Observation',
+    id: 'obs-smoking-cb',
+    status: 'final',
+    code: { coding: [{ system: 'http://loinc.org', code: '72166-2', display: 'Tobacco smoking status' }] },
+    subject: { reference: 'Patient/patient-charlie-brown' },
+    effectiveDateTime: todayAt(9, 30, -5),
+    valueCodeableConcept: {
+      coding: [{ system: 'http://snomed.info/sct', code: '266919005', display: 'Never smoker' }],
+      text: 'Never smoker',
+    },
+  };
+  woundObs.push(smokingObs);
+
   for (const obs of woundObs) {
     await medplum.createResource(obs);
   }

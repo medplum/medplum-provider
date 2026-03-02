@@ -68,6 +68,14 @@ const root = createRoot(container);
   // Seed Phase 1 data (infrastructure: orgs, practitioners, questionnaires, eReferral bundle)
   await seedPhase1(medplum);
 
+  // Set initial profile to coordinator (default role)
+  try {
+    const coordinator = await medplum.readResource('Practitioner', 'coordinator-anderson');
+    (medplum as any).setProfile(coordinator);
+  } catch {
+    // Ignore if practitioner not found
+  }
+
   root.render(
     <StrictMode>
       <MedplumProvider medplum={medplum} navigate={navigate}>

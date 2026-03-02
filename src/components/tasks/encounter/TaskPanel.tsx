@@ -11,6 +11,7 @@ import { IconCircleOff } from '@tabler/icons-react';
 import type { JSX } from 'react';
 import { useNavigate } from 'react-router';
 import { SAVE_TIMEOUT_MS } from '../../../config/constants';
+import { createWoundObservationsFromCLE34 } from '../../../utils/woundObservation';
 import { SimpleTask } from './SimpleTask';
 import { TaskQuestionnaireForm } from './TaskQuestionnaireForm';
 import { TaskServiceRequest } from './TaskServiceRequest';
@@ -56,6 +57,14 @@ export const TaskPanel = (props: TaskPanelProps): JSX.Element => {
             ],
           });
           onUpdateTask(updatedTask);
+        }
+
+        // Create wound observations from CLE34 form saves
+        const isCLE34 = task.code?.coding?.some((c) => c.code === 'CLE34');
+        const encounterId = task.encounter?.reference?.replace('Encounter/', '');
+        const patientId = task.for?.reference?.replace('Patient/', '');
+        if (isCLE34 && encounterId && patientId) {
+          await createWoundObservationsFromCLE34(medplum, response, encounterId, patientId);
         }
       } catch (err) {
         console.error(err);

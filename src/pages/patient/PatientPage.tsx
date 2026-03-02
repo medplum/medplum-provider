@@ -1,11 +1,12 @@
-import { Loader, ScrollArea } from '@mantine/core';
+import { Loader } from '@mantine/core';
 import { getReferenceString, isOk } from '@medplum/core';
 import type { OperationOutcome } from '@medplum/fhirtypes';
-import { Document, OperationOutcomeAlert, PatientSummary, useMedplum } from '@medplum/react';
+import { Document, OperationOutcomeAlert, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Location } from 'react-router';
 import { Outlet, useLocation, useNavigate } from 'react-router';
+import { DemoPatientSummary } from '../../components/DemoPatientSummary';
 import { usePatient } from '../../hooks/usePatient';
 import classes from './PatientPage.module.css';
 import type { PatientPageTabInfo } from './PatientPage.utils';
@@ -52,27 +53,6 @@ export function PatientPage(): JSX.Element {
     }
   }, [currentTab, location, tabs]);
 
-  // Hide irrelevant PatientSummary sidebar sections (no props available for this)
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const sidebar = sidebarRef.current;
-    if (!sidebar) return;
-    const hideSections = ['Insurance', 'Labs', 'Sexual Orientation', 'Pharmacies'];
-    const hideSectionElements = (): void => {
-      sidebar.querySelectorAll('[class*="CollapsibleSection"] [class*="title"]').forEach((el) => {
-        if (hideSections.some((s) => el.textContent?.trim() === s)) {
-          const section = el.closest('[class*="CollapsibleSection_root"]') as HTMLElement | null;
-          if (section) section.style.display = 'none';
-        }
-      });
-    };
-    // Run immediately and observe for async rendering
-    hideSectionElements();
-    const observer = new MutationObserver(hideSectionElements);
-    observer.observe(sidebar, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, [patient]);
-
   if (outcome && !isOk(outcome)) {
     return (
       <Document>
@@ -92,20 +72,20 @@ export function PatientPage(): JSX.Element {
 
   return (
     <div key={getReferenceString(patient)} className={classes.container}>
-      <div ref={sidebarRef} className={classes.sidebar}>
-        <ScrollArea className={classes.scrollArea}>
-          <PatientSummary
-            patient={patient}
-            onClickResource={(resource) =>
-              navigate(`/Patient/${patientId}/${resource.resourceType}/${resource.id}`)?.catch(
-                console.error
-              )
-            }
-          />
-        </ScrollArea>
+      <div className={classes.sidebar}>
+        <DemoPatientSummary
+          patient={patient}
+          onClickResource={(resource) =>
+            navigate(`/Patient/${patientId}/${resource.resourceType}/${resource.id}`)?.catch(
+              console.error
+            )
+          }
+        />
       </div>
       <div className={classes.content}>
-        <PatientTabsNavigation tabs={tabs} currentTab={currentTab} onTabChange={onTabChange} />
+        {!location.pathname.includes('/Encounter/') && (
+          <PatientTabsNavigation tabs={tabs} currentTab={currentTab} onTabChange={onTabChange} />
+        )}
         <Outlet context={{ patient, medplum }} />
       </div>
     </div>

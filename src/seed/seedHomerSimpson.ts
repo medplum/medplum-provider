@@ -266,6 +266,47 @@ export async function seedHomerSimpson(medplum: MedplumClient): Promise<void> {
   bgObs.encounter = { reference: 'Encounter/enc-initial-visit-hs' };
   woundObs.push(bgObs);
 
+  // Smoking status (LOINC 72166-2)
+  const smokingObs: Observation = {
+    resourceType: 'Observation',
+    id: 'obs-smoking-hs',
+    status: 'final',
+    code: { coding: [{ system: 'http://loinc.org', code: '72166-2', display: 'Tobacco smoking status' }] },
+    subject: { reference: 'Patient/patient-homer-simpson' },
+    effectiveDateTime: todayAt(9, 30, -5),
+    valueCodeableConcept: {
+      coding: [{ system: 'http://snomed.info/sct', code: '8517006', display: 'Ex-smoker' }],
+      text: 'Former smoker',
+    },
+  };
+  woundObs.push(smokingObs);
+
+  // Heart rate (LOINC 8867-4)
+  const hrObs: Observation = {
+    resourceType: 'Observation',
+    id: 'obs-hr-hs-01',
+    status: 'final',
+    code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }] },
+    subject: { reference: 'Patient/patient-homer-simpson' },
+    encounter: { reference: 'Encounter/enc-initial-visit-hs' },
+    effectiveDateTime: todayAt(9, 30, -5),
+    valueQuantity: { value: 82, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' },
+  };
+  woundObs.push(hrObs);
+
+  // SpO2 (LOINC 2708-6)
+  const spo2Obs: Observation = {
+    resourceType: 'Observation',
+    id: 'obs-spo2-hs-01',
+    status: 'final',
+    code: { coding: [{ system: 'http://loinc.org', code: '2708-6', display: 'Oxygen saturation' }] },
+    subject: { reference: 'Patient/patient-homer-simpson' },
+    encounter: { reference: 'Encounter/enc-initial-visit-hs' },
+    effectiveDateTime: todayAt(9, 30, -5),
+    valueQuantity: { value: 96, unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
+  };
+  woundObs.push(spo2Obs);
+
   for (const obs of woundObs) {
     await medplum.createResource(obs);
   }

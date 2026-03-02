@@ -2,6 +2,7 @@ import { AppShell, Loading, useMedplum } from '@medplum/react';
 import {
   IconCalendarEvent,
   IconClipboardCheck,
+  IconClipboardList,
   IconFileText,
   IconUsers,
 } from '@tabler/icons-react';
@@ -26,6 +27,7 @@ import { ReferralDetailPage } from './pages/referral/ReferralDetailPage';
 import { ReferralQueuePage } from './pages/referral/ReferralQueuePage';
 import { ResourceDetailPage } from './pages/resource/ResourceDetailPage';
 import { ResourcePage } from './pages/resource/ResourcePage';
+import { QuestionnairesPage } from './pages/questionnaires/QuestionnairesPage';
 import { NurseSchedulePage } from './pages/schedule/NurseSchedulePage';
 import { SearchPage } from './pages/SearchPage';
 
@@ -59,6 +61,7 @@ function AppRoutes(): JSX.Element {
                   href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
                 },
                 { icon: <IconCalendarEvent />, label: 'Schedule', href: '/nurse-schedule' },
+                { icon: <IconClipboardList />, label: 'Forms', href: '/questionnaires' },
               ]
             : [
                 { icon: <IconClipboardCheck />, label: 'My Schedule', href: '/nurse-schedule' },
@@ -67,6 +70,7 @@ function AppRoutes(): JSX.Element {
                   label: 'Patients',
                   href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
                 },
+                { icon: <IconClipboardList />, label: 'Forms', href: '/questionnaires' },
               ],
         },
       ]}
@@ -83,6 +87,9 @@ function AppRoutes(): JSX.Element {
 
           {/* Nurse schedule */}
           <Route path="/nurse-schedule" element={<NurseSchedulePage />} />
+
+          {/* Forms library */}
+          <Route path="/questionnaires" element={<QuestionnairesPage />} />
 
           {/* Patient routes */}
           <Route path="/Patient/:patientId" element={<PatientPage />}>

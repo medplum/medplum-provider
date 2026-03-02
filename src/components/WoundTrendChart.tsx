@@ -31,11 +31,20 @@ export function WoundTrendChart({ patientId }: WoundTrendChartProps): JSX.Elemen
 
   const loadData = useCallback(async () => {
     try {
-      // Query wound surface area observations (LOINC 72298-3)
-      const observations = await medplum.searchResources(
-        'Observation',
-        `subject=Patient/${patientId}&code=72298-3&_sort=date`
+      // MockClient doesn't support compound search params, so fetch all + filter
+      const allObs = await medplum.searchResources('Observation', '_count=500');
+      const observations = allObs.filter(
+        (obs: Observation) =>
+          obs.subject?.reference === `Patient/${patientId}` &&
+          obs.code?.coding?.some((c) => c.code === '72298-3')
       );
+
+      // Sort by effective date
+      observations.sort((a, b) => {
+        const da = new Date(a.effectiveDateTime || '').getTime();
+        const db = new Date(b.effectiveDateTime || '').getTime();
+        return da - db;
+      });
 
       const points: DataPoint[] = observations
         .filter((obs: Observation) => obs.valueQuantity?.value !== undefined)

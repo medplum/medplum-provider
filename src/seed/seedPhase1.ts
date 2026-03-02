@@ -132,6 +132,18 @@ export async function seedPhase1(medplum: MedplumClient): Promise<void> {
     }
   }
 
+  // 2b. Demo Practitioner: Branch Coordinator (for RoleSwitcher profile)
+  const coordinator: Practitioner = {
+    resourceType: 'Practitioner',
+    id: 'coordinator-anderson',
+    name: [{ given: ['Sarah'], family: 'Anderson', prefix: ['Ms.'] }],
+    identifier: [{ system: 'https://bayshore.ca/fhir/Practitioner', value: 'COORD-001' }],
+    qualification: [{ code: { text: 'Branch Coordinator' } }],
+  };
+  if (!seenPractIds.has('coordinator-anderson')) {
+    await medplum.createResource(coordinator);
+  }
+
   // 3. PlanDefinition
   await medplum.createResource(pdWoundCareIcs as unknown as PlanDefinition);
 

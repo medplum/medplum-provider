@@ -1,16 +1,30 @@
 import { Badge, Group, SegmentedControl } from '@mantine/core';
+import { useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
 import { useNavigate } from 'react-router';
 import type { DemoRole } from '../context/RoleContext';
 import { useRole } from '../context/RoleContext';
 
+const ROLE_PRACTITIONER_MAP: Record<DemoRole, string> = {
+  coordinator: 'coordinator-anderson',
+  nurse: 'nurse-ratched',
+};
+
 export function RoleSwitcher(): JSX.Element {
   const { role, setRole } = useRole();
   const navigate = useNavigate();
+  const medplum = useMedplum();
 
   const handleChange = (value: string): void => {
     const newRole = value as DemoRole;
     setRole(newRole);
+
+    // Switch practitioner profile so the header name updates
+    const practitionerId = ROLE_PRACTITIONER_MAP[newRole];
+    medplum.readResource('Practitioner', practitionerId).then((practitioner) => {
+      (medplum as any).setProfile(practitioner);
+    }).catch(console.error);
+
     if (newRole === 'coordinator') {
       navigate('/referrals')?.catch(console.error);
     } else {
