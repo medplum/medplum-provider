@@ -19,5 +19,5 @@
       "@bayshore-data/*": ["bayshore-test-data/*"]
     }
   },
-  "exclude": ["dist"]
+  "exclude": ["dist", "**/*.test.ts", "**/*.test.tsx"]
 }

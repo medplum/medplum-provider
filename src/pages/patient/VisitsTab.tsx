@@ -43,7 +43,11 @@ export function VisitsTab(): JSX.Element {
 
   const loadVisits = useCallback(async () => {
     try {
-      const appointments = await medplum.searchResources('Appointment', `patient=Patient/${patientId}`);
+      // MockClient doesn't support compound search params, so fetch all + filter client-side
+      const allAppointments = await medplum.searchResources('Appointment', '_count=100');
+      const appointments = allAppointments.filter(
+        (appt) => appt.participant?.some((p) => p.actor?.reference === `Patient/${patientId}`)
+      );
 
       // Sort by date descending
       appointments.sort((a, b) => {
@@ -52,19 +56,13 @@ export function VisitsTab(): JSX.Element {
         return db - da;
       });
 
-      // Load linked encounters
+      // Load linked encounters (fetch all once, then match)
+      const allEncounters = await medplum.searchResources('Encounter', '_count=200');
       const rows: VisitRow[] = [];
       for (const appt of appointments) {
-        let encounter: Encounter | undefined;
-        try {
-          const encounters = await medplum.searchResources(
-            'Encounter',
-            `appointment=Appointment/${appt.id}`
-          );
-          encounter = encounters[0];
-        } catch {
-          // No encounter yet
-        }
+        const encounter = allEncounters.find(
+          (enc) => enc.appointment?.some((a) => a.reference === `Appointment/${appt.id}`)
+        );
         rows.push({ appointment: appt, encounter });
       }
       setVisits(rows);

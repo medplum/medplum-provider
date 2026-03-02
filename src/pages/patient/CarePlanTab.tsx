@@ -17,8 +17,11 @@ export function CarePlanTab(): JSX.Element {
 
   const loadData = useCallback(async () => {
     try {
-      // Load CarePlan
-      const plans = await medplum.searchResources('CarePlan', `subject=Patient/${patientId}&status=active`);
+      // Load CarePlan (MockClient doesn't support compound search params, so fetch all + filter)
+      const allPlans = await medplum.searchResources('CarePlan', '_count=100');
+      const plans = allPlans.filter(
+        (cp) => cp.subject?.reference === `Patient/${patientId}` && cp.status === 'active'
+      );
       const plan = plans[0];
 
       if (plan) {
