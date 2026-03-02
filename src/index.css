@@ -1,3 +1,69 @@
+/* ─── Bayshore Brand Overrides ─── */
+
+/*
+ * Brand colors:
+ *   Primary teal:  #0b435a
+ *   Accent gold:   #c9a376
+ *   White:         #ffffff
+ */
+
+/* AppShell header — dark teal background */
+.mantine-AppShell-header {
+  background-color: #0b435a !important;
+  border-bottom: 2px solid #c9a376 !important;
+}
+
+/* Header search input — teal-themed */
+.mantine-AppShell-header input {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.mantine-AppShell-header input::placeholder {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Header buttons, icons, and text — white on teal */
+.mantine-AppShell-header .mantine-ActionIcon-root,
+.mantine-AppShell-header .mantine-UnstyledButton-root {
+  color: #fff !important;
+}
+
+.mantine-AppShell-header .mantine-UnstyledButton-root:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Navbar sidebar — light teal tint */
+.mantine-AppShell-navbar {
+  background-color: #f0f7fa !important;
+  border-right: 1px solid #b8dce8 !important;
+}
+
+/* Navbar links — teal color scheme */
+.mantine-AppShell-navbar .mantine-UnstyledButton-root {
+  color: #0b435a !important;
+  border-radius: 6px;
+}
+
+.mantine-AppShell-navbar .mantine-UnstyledButton-root:hover {
+  background-color: #e6f2f7 !important;
+}
+
+/* Active navbar link */
+.mantine-AppShell-navbar .mantine-UnstyledButton-root[data-active="true"],
+.mantine-AppShell-navbar a[data-active="true"] {
+  background-color: #0b435a !important;
+  color: #fff !important;
+}
+
+/* Main content area */
+.mantine-AppShell-main {
+  background-color: #f8fbfc !important;
+}
+
+/* ─── Calendar styles ─── */
+
 .rbc-calendar {
   font-family:
     -apple-system, 'system-ui', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';

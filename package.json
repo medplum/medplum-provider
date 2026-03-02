@@ -31,6 +31,7 @@
     "@medplum/fhirtypes": "5.1.1",
     "@medplum/health-gorilla-core": "5.1.1",
     "@medplum/health-gorilla-react": "5.1.1",
+    "@medplum/mock": "^5.1.1",
     "@medplum/react": "5.1.1",
     "@tabler/icons-react": "3.37.1",
     "@testing-library/dom": "10.4.1",
@@ -61,5 +62,8 @@
   "packageManager": "npm@10.9.4",
   "engines": {
     "node": "^22.18.0 || >=24.2.0"
+  },
+  "dependencies": {
+    "@medplum/react-hooks": "^5.1.1"
   }
 }

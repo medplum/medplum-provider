@@ -1,229 +1,116 @@
-// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
-// SPDX-License-Identifier: Apache-2.0
-import { getReferenceString } from '@medplum/core';
-import { useDoseSpotNotifications } from '@medplum/dosespot-react';
-import { AppShell, Loading, Logo, useMedplum, useMedplumProfile } from '@medplum/react';
+import { AppShell, Loading, useMedplum } from '@medplum/react';
 import {
-  IconApps,
-  IconBook2,
   IconCalendarEvent,
   IconClipboardCheck,
-  IconMail,
-  IconPill,
-  IconSettingsAutomation,
-  IconUserPlus,
+  IconFileText,
   IconUsers,
 } from '@tabler/icons-react';
 import type { JSX } from 'react';
-import { Suspense, useState } from 'react';
+import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router';
-import { TaskDetailsModal } from './components/tasks/TaskDetailsModal';
-import { hasDoseSpotIdentifier } from './components/utils';
+import { BayshoreLogo } from './components/BayshoreLogo';
+import { RoleSwitcher } from './components/RoleSwitcher';
+import { RoleProvider, useRole } from './context/RoleContext';
 import './index.css';
 
-const SETUP_DISMISSED_KEY = 'medplum-provider-setup-completed';
-
 import { EncounterChartPage } from './pages/encounter/EncounterChartPage';
-import { EncounterModal } from './pages/encounter/EncounterModal';
-import { GetStartedPage } from './pages/getstarted/GetStartedPage';
-import { DoseSpotFavoritesPage } from './pages/integrations/DoseSpotFavoritesPage';
-import { DoseSpotNotificationsPage } from './pages/integrations/DoseSpotNotificationsPage';
-import { IntegrationsPage } from './pages/integrations/IntegrationsPage';
-import { MessagesPage } from './pages/messages/MessagesPage';
-import { CommunicationTab } from './pages/patient/CommunicationTab';
-import { DoseSpotTab } from './pages/patient/DoseSpotTab';
+import { CarePlanTab } from './pages/patient/CarePlanTab';
+import { DocumentsTab } from './pages/patient/DocumentsTab';
 import { EditTab } from './pages/patient/EditTab';
-import { ExportTab } from './pages/patient/ExportTab';
-import { IntakeFormPage } from './pages/patient/IntakeFormPage';
-import { LabsPage } from './pages/patient/LabsPage';
-import { MedicationsPage } from './pages/patient/MedicationsPage';
+import { MedicationsTab } from './pages/patient/MedicationsTab';
 import { PatientPage } from './pages/patient/PatientPage';
 import { PatientSearchPage } from './pages/patient/PatientSearchPage';
-import { TasksTab } from './pages/patient/TasksTab';
 import { TimelineTab } from './pages/patient/TimelineTab';
-import { ResourceCreatePage } from './pages/resource/ResourceCreatePage';
+import { VisitsTab } from './pages/patient/VisitsTab';
+import { ReferralDetailPage } from './pages/referral/ReferralDetailPage';
+import { ReferralQueuePage } from './pages/referral/ReferralQueuePage';
 import { ResourceDetailPage } from './pages/resource/ResourceDetailPage';
-import { ResourceEditPage } from './pages/resource/ResourceEditPage';
-import { ResourceHistoryPage } from './pages/resource/ResourceHistoryPage';
 import { ResourcePage } from './pages/resource/ResourcePage';
-import { SchedulePage } from './pages/schedule/SchedulePage';
+import { NurseSchedulePage } from './pages/schedule/NurseSchedulePage';
 import { SearchPage } from './pages/SearchPage';
-import { SignInPage } from './pages/SignInPage';
-import { SpacesPage } from './pages/spaces/SpacesPage';
-import { TasksPage } from './pages/tasks/TasksPage';
 
-export function App(): JSX.Element | null {
+function AppRoutes(): JSX.Element {
   const medplum = useMedplum();
-  const profile = useMedplumProfile();
-  const doseSpotCount = useDoseSpotNotifications();
+  const { role } = useRole();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const [setupDismissed, setSetupDismissed] = useState(() => localStorage.getItem(SETUP_DISMISSED_KEY) === 'true');
-
-  const handleDismissSetup = (): void => {
-    localStorage.setItem(SETUP_DISMISSED_KEY, 'true');
-    setSetupDismissed(true);
-  };
 
   if (medplum.isLoading()) {
-    return null;
+    return <Loading />;
   }
 
-  const membership = medplum.getProjectMembership();
-  const hasDoseSpot = hasDoseSpotIdentifier(membership);
+  const defaultRoute = role === 'coordinator' ? '/referrals' : '/nurse-schedule';
 
   return (
     <AppShell
-      logo={<Logo size={24} />}
+      logo={<BayshoreLogo />}
       pathname={location.pathname}
       searchParams={searchParams}
       layoutVersion="v2"
       showLayoutVersionToggle={false}
-      menus={
-        profile
-          ? [
-              {
-                links: [
-                  { icon: <IconBook2 />, label: 'Spaces', href: '/Spaces/Communication' },
-                  {
-                    icon: <IconUsers />,
-                    label: 'Patients',
-                    href: '/Patient?_count=20&_fields=name,email,gender&_sort=-_lastUpdated',
-                  },
-                  { icon: <IconCalendarEvent />, label: 'Schedule', href: '/schedule' },
-                  {
-                    icon: <IconMail />,
-                    label: 'Messages',
-                    href: `/Communication?status=in-progress`,
-                    notificationCount: {
-                      resourceType: 'Communication',
-                      countCriteria:
-                        'status=in-progress&_has:Communication:part-of:_id:not=null&identifier:not=ai-message-topic&_summary=count',
-                      subscriptionCriteria: `Communication?status=in-progress&_has:Communication:part-of:_id:not=null&identifier:not=ai-message-topic`,
-                    },
-                  },
-                  {
-                    icon: <IconClipboardCheck />,
-                    label: 'Tasks',
-                    href: `/Task?owner=${getReferenceString(profile)}&_sort=-_lastUpdated&status=requested,ready,received,accepted,in-progress,draft`,
-                    notificationCount: {
-                      resourceType: 'Task',
-                      countCriteria: `owner=${getReferenceString(profile)}&status=requested,ready,received,accepted,in-progress,draft&_summary=count`,
-                      subscriptionCriteria: `Task?owner=${getReferenceString(profile)}&status=requested,ready,received,accepted,in-progress,draft`,
-                    },
-                  },
-                ],
-              },
-              {
-                title: 'Quick Links',
-                links: [
-                  ...(!setupDismissed
-                    ? [
-                        {
-                          icon: <IconSettingsAutomation />,
-                          label: 'Get Started',
-                          href: '/getstarted',
-                          onDismiss: handleDismissSetup,
-                        },
-                      ]
-                    : []),
-                  { icon: <IconUserPlus />, label: 'New Patient', href: '/onboarding' },
-                  { icon: <IconApps />, label: 'Integrations', href: '/integrations' },
-                  ...(hasDoseSpot
-                    ? [
-                        {
-                          icon: <IconPill />,
-                          label: 'DoseSpot',
-                          href: '/dosespot',
-                          alert: true,
-                          count: doseSpotCount ?? 0,
-                        },
-                      ]
-                    : []),
-                ],
-              },
-            ]
-          : undefined
-      }
+      menus={[
+        {
+          links: role === 'coordinator'
+            ? [
+                { icon: <IconFileText />, label: 'Referrals', href: '/referrals' },
+                {
+                  icon: <IconUsers />,
+                  label: 'Patients',
+                  href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
+                },
+                { icon: <IconCalendarEvent />, label: 'Schedule', href: '/nurse-schedule' },
+              ]
+            : [
+                { icon: <IconClipboardCheck />, label: 'My Schedule', href: '/nurse-schedule' },
+                {
+                  icon: <IconUsers />,
+                  label: 'Patients',
+                  href: '/Patient?_count=20&_fields=name,gender&_sort=-_lastUpdated',
+                },
+              ],
+        },
+      ]}
       resourceTypeSearchDisabled={true}
-      spotlightPatientsOnly={true}
+      notifications={<RoleSwitcher />}
     >
       <Suspense fallback={<Loading />}>
         <Routes>
-          {profile ? (
-            <>
-              <Route path="/getstarted" element={<GetStartedPage />} />
-              <Route path="/Spaces/Communication" element={<SpacesPage />}>
-                <Route index element={<SpacesPage />} />
-                <Route path=":topicId" element={<SpacesPage />} />
-              </Route>
-              <Route
-                path="/"
-                element={
-                  <Navigate
-                    to={
-                      setupDismissed
-                        ? '/Patient?_count=20&_fields=name,email,gender&_sort=-_lastUpdated'
-                        : '/getstarted'
-                    }
-                    replace
-                  />
-                }
-              />
-              <Route path="/Patient/new" element={<ResourceCreatePage />} />
-              <Route path="/Patient/:patientId" element={<PatientPage />}>
-                <Route path="Encounter/new" element={<EncounterModal />} />
-                <Route path="Encounter/:encounterId" element={<EncounterChartPage />}>
-                  <Route path="Task/:taskId" element={<TaskDetailsModal />} />
-                </Route>
-                <Route path="edit" element={<EditTab />} />
-                <Route path="Communication" element={<CommunicationTab />} />
-                <Route path="Communication/:messageId" element={<CommunicationTab />} />
-                <Route path="Task" element={<TasksTab />} />
-                <Route path="Task/:taskId" element={<TasksTab />} />
-                {hasDoseSpot && <Route path="dosespot" element={<DoseSpotTab />} />}
-                <Route path="timeline" element={<TimelineTab />} />
-                <Route path="export" element={<ExportTab />} />
-                <Route path="ServiceRequest" element={<LabsPage />} />
-                <Route path="ServiceRequest/:serviceRequestId" element={<LabsPage />} />
-                <Route path="MedicationRequest" element={<MedicationsPage />} />
-                <Route path=":resourceType" element={<PatientSearchPage />} />
-                <Route path=":resourceType/new" element={<ResourceCreatePage />} />
-                <Route path=":resourceType/:id" element={<ResourcePage />}>
-                  <Route path="" element={<ResourceDetailPage />} />
-                  <Route path="edit" element={<ResourceEditPage />} />
-                  <Route path="history" element={<ResourceHistoryPage />} />
-                </Route>
-                <Route path="" element={<TimelineTab />} />
-              </Route>
-              <Route path="/Communication" element={<MessagesPage />}>
-                <Route index element={<MessagesPage />} />
-                <Route path=":messageId" element={<MessagesPage />} />
-              </Route>
-              <Route path="Task" element={<TasksPage />} />
-              <Route path="Task/:taskId" element={<TasksPage />} />
-              <Route path="/onboarding" element={<IntakeFormPage />} />
-              <Route path="/schedule" element={<SchedulePage />} />
-              <Route path="/signin" element={<SignInPage />} />
-              {hasDoseSpot && <Route path="/dosespot" element={<DoseSpotNotificationsPage />} />}
-              <Route path="/integrations" element={<IntegrationsPage />} />
-              <Route path="/:resourceType" element={<SearchPage />} />
-              <Route path="/:resourceType/new" element={<ResourceCreatePage />} />
-              <Route path="/:resourceType/:id" element={<ResourcePage />}>
-                <Route path="" element={<ResourceDetailPage />} />
-                <Route path="edit" element={<ResourceEditPage />} />
-                <Route path="history" element={<ResourceHistoryPage />} />
-              </Route>
-              {hasDoseSpot && <Route path="/integrations/dosespot" element={<DoseSpotFavoritesPage />} />}
-            </>
-          ) : (
-            <>
-              <Route path="/signin" element={<SignInPage />} />
-              <Route path="*" element={<Navigate to="/signin" replace />} />
-            </>
-          )}
+          <Route path="/" element={<Navigate to={defaultRoute} replace />} />
+
+          {/* Referral routes (coordinator) */}
+          <Route path="/referrals" element={<ReferralQueuePage />} />
+          <Route path="/referrals/:bundleId" element={<ReferralDetailPage />} />
+
+          {/* Nurse schedule */}
+          <Route path="/nurse-schedule" element={<NurseSchedulePage />} />
+
+          {/* Patient routes */}
+          <Route path="/Patient/:patientId" element={<PatientPage />}>
+            <Route path="edit" element={<EditTab />} />
+            <Route path="careplan" element={<CarePlanTab />} />
+            <Route path="visits" element={<VisitsTab />} />
+            <Route path="medications" element={<MedicationsTab />} />
+            <Route path="documents" element={<DocumentsTab />} />
+            <Route path="Encounter/:encounterId" element={<EncounterChartPage />} />
+            <Route path=":resourceType" element={<PatientSearchPage />} />
+            <Route path=":resourceType/:id" element={<ResourcePage />}>
+              <Route path="" element={<ResourceDetailPage />} />
+            </Route>
+            <Route path="" element={<TimelineTab />} />
+          </Route>
+
+          {/* Generic search */}
+          <Route path="/:resourceType" element={<SearchPage />} />
         </Routes>
       </Suspense>
     </AppShell>
+  );
+}
+
+export function App(): JSX.Element {
+  return (
+    <RoleProvider>
+      <AppRoutes />
+    </RoleProvider>
   );
 }
