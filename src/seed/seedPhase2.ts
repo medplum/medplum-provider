@@ -210,18 +210,6 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
       period: { start: todayAt(9, 0, -2), end: todayAt(9, 45, -2) },
       serviceProvider: { reference: 'Organization/bayshore-ics-mississauga' },
     },
-    {
-      resourceType: 'Encounter',
-      id: 'enc-routine-today-cb',
-      status: 'planned',
-      class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'HH', display: 'home health' },
-      type: [{ text: 'Routine Wound Care (Visit 3)' }],
-      subject: { reference: 'Patient/patient-charlie-brown' },
-      participant: [{ individual: { reference: 'Practitioner/nurse-ratched' } }],
-      appointment: [{ reference: 'Appointment/appt-visit-3-cb' }],
-      period: { start: todayAt(9, 0) },
-      serviceProvider: { reference: 'Organization/bayshore-ics-mississauga' },
-    },
   ];
   for (const enc of encounters) {
     await medplum.createResource(enc);
@@ -361,12 +349,7 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
     makeVisitTask('task-v2-cle34', 'enc-routine-visit-2-cb', 'q-cle34-wound-flowsheet', 'CLE34', 'Wound Care Flow Sheet', 'completed', 'qr-cle34-cb-04', -2),
   ];
 
-  // Today's visit tasks (ready for nurse)
-  const todayTasks: Task[] = [
-    makeVisitTask('task-today-cle34', 'enc-routine-today-cb', 'q-cle34-wound-flowsheet', 'CLE34', 'Wound Care Flow Sheet', 'ready', undefined, 0),
-  ];
-
-  for (const t of [...initialVisitTasks, ...visit2Tasks, ...todayTasks]) {
+  for (const t of [...initialVisitTasks, ...visit2Tasks]) {
     await medplum.createResource(t);
   }
 
