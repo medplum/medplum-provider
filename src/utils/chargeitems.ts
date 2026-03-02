@@ -49,7 +49,11 @@ export async function getChargeItemsForEncounter(
     return [];
   }
 
-  const chargeItems = await medplum.searchResources('ChargeItem', `context=${getReferenceString(encounter)}`);
+  // MockClient doesn't support reference search params, so fetch all + filter
+  const allChargeItems = await medplum.searchResources('ChargeItem', '_count=100');
+  const chargeItems = allChargeItems.filter(
+    (ci) => ci.context?.reference === getReferenceString(encounter)
+  );
   const updatedChargeItems = await Promise.all(
     chargeItems.map((chargeItem) => applyChargeItemDefinition(medplum, chargeItem))
   );

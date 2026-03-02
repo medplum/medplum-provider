@@ -1,14 +1,16 @@
-import { Badge, Card, Divider, Group, Stack, Text, Title } from '@mantine/core';
+import { Badge, Button, Card, Divider, Group, Stack, Text, Title } from '@mantine/core';
 import type { Appointment, Encounter } from '@medplum/fhirtypes';
 import { Document, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { startWoundCareVisit } from '../../utils/startVisit';
 
 interface VisitCard {
   appointment: Appointment;
   encounter?: Encounter;
   patientName: string;
+  patientId?: string;
 }
 
 function isToday(iso?: string): boolean {
@@ -45,25 +47,26 @@ export function NurseSchedulePage(): JSX.Element {
   const navigate = useNavigate();
   const [visits, setVisits] = useState<VisitCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState<string | null>(null);
 
   const loadSchedule = useCallback(async () => {
     try {
       // Load all appointments (in demo, all belong to nurse-ratched)
-      const appointments = await medplum.searchResources('Appointment', '_count=50&_sort=date');
+      const appointments = await medplum.searchResources('Appointment', '_count=50');
+
+      // MockClient doesn't support Encounter?appointment=..., so fetch all + filter
+      const allEncounters = await medplum.searchResources('Encounter', '_count=200');
 
       const cards: VisitCard[] = [];
       for (const appt of appointments) {
-        // Find linked encounter
-        let encounter: Encounter | undefined;
-        try {
-          const encounters = await medplum.searchResources('Encounter', `appointment=Appointment/${appt.id}`);
-          encounter = encounters[0];
-        } catch {
-          // No encounter
-        }
+        // Find linked encounter by matching appointment reference
+        const encounter = allEncounters.find(
+          (enc) => enc.appointment?.some((a) => a.reference === `Appointment/${appt.id}`)
+        );
 
         // Get patient name from participant
         const patientRef = appt.participant?.find((p) => p.actor?.reference?.startsWith('Patient/'));
+        const patientId = patientRef?.actor?.reference?.replace('Patient/', '');
         let patientName = 'Unknown Patient';
         if (patientRef?.actor?.reference) {
           try {
@@ -77,7 +80,7 @@ export function NurseSchedulePage(): JSX.Element {
           }
         }
 
-        cards.push({ appointment: appt, encounter, patientName });
+        cards.push({ appointment: appt, encounter, patientName, patientId });
       }
 
       // Sort by date ascending
@@ -97,6 +100,22 @@ export function NurseSchedulePage(): JSX.Element {
     loadSchedule();
   }, [loadSchedule]);
 
+  const handleStartVisit = useCallback(
+    async (v: VisitCard) => {
+      if (!v.patientId || !v.appointment.id) return;
+      setStarting(v.appointment.id);
+      try {
+        const encounter = await startWoundCareVisit(medplum, v.appointment, v.patientId);
+        navigate(`/Patient/${v.patientId}/Encounter/${encounter.id}`)?.catch(console.error);
+      } catch (err) {
+        console.error('Failed to start visit:', err);
+      } finally {
+        setStarting(null);
+      }
+    },
+    [medplum, navigate]
+  );
+
   if (loading) {
     return <Document><Text>Loading schedule...</Text></Document>;
   }
@@ -107,23 +126,22 @@ export function NurseSchedulePage(): JSX.Element {
 
   const renderCard = (v: VisitCard) => {
     const today = isToday(v.appointment.start);
+    const canStartVisit = v.appointment.status === 'booked' && !v.encounter && v.patientId;
+    const hasEncounter = !!v.encounter?.id;
+
     return (
       <Card
         key={v.appointment.id}
         withBorder
         shadow={today ? 'md' : 'sm'}
         style={{
-          cursor: v.encounter ? 'pointer' : 'default',
+          cursor: hasEncounter ? 'pointer' : 'default',
           borderColor: today ? 'var(--mantine-color-blue-5)' : undefined,
           borderWidth: today ? 2 : 1,
         }}
         onClick={() => {
-          if (v.encounter?.id) {
-            const patientRef = v.appointment.participant?.find((p) => p.actor?.reference?.startsWith('Patient/'));
-            const patientId = patientRef?.actor?.reference?.replace('Patient/', '');
-            if (patientId) {
-              navigate(`/Patient/${patientId}/Encounter/${v.encounter.id}`)?.catch(console.error);
-            }
+          if (hasEncounter && v.patientId) {
+            navigate(`/Patient/${v.patientId}/Encounter/${v.encounter!.id}`)?.catch(console.error);
           }
         }}
       >
@@ -138,9 +156,24 @@ export function NurseSchedulePage(): JSX.Element {
               {formatDate(v.appointment.start)} | {formatTime(v.appointment.start)} — {formatTime(v.appointment.end)}
             </Text>
           </Stack>
-          <Badge variant="light" color={getStatusColor(v.encounter?.status || v.appointment.status)}>
-            {v.encounter?.status || v.appointment.status}
-          </Badge>
+
+          <Group gap="sm">
+            {canStartVisit && (
+              <Button
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartVisit(v);
+                }}
+                loading={starting === v.appointment.id}
+              >
+                Start Visit
+              </Button>
+            )}
+            <Badge variant="light" color={getStatusColor(v.encounter?.status || v.appointment.status)}>
+              {v.encounter?.status || v.appointment.status}
+            </Badge>
+          </Group>
         </Group>
       </Card>
     );

@@ -76,7 +76,11 @@ export const EncounterChart = (props: EncounterChartProps): JSX.Element => {
     }
 
     const fetchProvenance = async (): Promise<void> => {
-      const provenance = await medplum.searchResources('Provenance', `target=${getReferenceString(encounter)}`);
+      // MockClient doesn't support reference search params, so fetch all + filter
+      const allProvenance = await medplum.searchResources('Provenance', '_count=100');
+      const provenance = allProvenance.filter(
+        (p) => p.target?.some((t) => t.reference === getReferenceString(encounter))
+      );
       setProvenances(provenance);
       if (provenance.length > 0 && clinicalImpression?.status === 'completed') {
         setChartNoteStatus(ChartNoteStatus.SignedAndLocked);

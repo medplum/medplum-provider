@@ -68,7 +68,11 @@ export function useEncounterChart(
       if (!encounterResource?.id) {
         return;
       }
-      const response = await medplum.searchResources('Claim', `encounter=${getReferenceString(encounterResource)}`);
+      // MockClient doesn't support reference search params, so fetch all + filter
+      const allClaims = await medplum.searchResources('Claim', '_count=100');
+      const response = allClaims.filter(
+        (c) => c.item?.some((i) => i.encounter?.some((e) => e.reference === getReferenceString(encounterResource)))
+      );
       if (response.length !== 0) {
         setClaim(response[0]);
       }
@@ -83,9 +87,11 @@ export function useEncounterChart(
     if (!encounterResource) {
       return;
     }
-    const taskResult = await medplum.searchResources('Task', `encounter=${getReferenceString(encounterResource)}`, {
-      cache: 'no-cache',
-    });
+    // MockClient doesn't support reference search params, so fetch all + filter
+    const allTasks = await medplum.searchResources('Task', '_count=200');
+    const taskResult = allTasks.filter(
+      (t) => t.encounter?.reference === getReferenceString(encounterResource)
+    );
 
     taskResult.sort((a: Task, b: Task) => {
       const dateA = new Date(a.authoredOn || '').getTime();
@@ -101,9 +107,10 @@ export function useEncounterChart(
     if (!encounterResource) {
       return;
     }
-    const clinicalImpressionResult = await medplum.searchResources(
-      'ClinicalImpression',
-      `encounter=${getReferenceString(encounterResource)}`
+    // MockClient doesn't support reference search params, so fetch all + filter
+    const allCI = await medplum.searchResources('ClinicalImpression', '_count=100');
+    const clinicalImpressionResult = allCI.filter(
+      (ci) => ci.encounter?.reference === getReferenceString(encounterResource)
     );
 
     const result = clinicalImpressionResult?.[0];

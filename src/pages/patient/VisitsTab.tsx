@@ -1,9 +1,10 @@
-import { Badge, Card, Group, Stack, Text, Title } from '@mantine/core';
+import { Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
 import type { Appointment, Encounter } from '@medplum/fhirtypes';
 import { Document, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { startWoundCareVisit } from '../../utils/startVisit';
 
 interface VisitRow {
   appointment: Appointment;
@@ -40,6 +41,7 @@ export function VisitsTab(): JSX.Element {
   const navigate = useNavigate();
   const [visits, setVisits] = useState<VisitRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState<string | null>(null);
 
   const loadVisits = useCallback(async () => {
     try {
@@ -75,6 +77,22 @@ export function VisitsTab(): JSX.Element {
     loadVisits();
   }, [loadVisits]);
 
+  const handleStartVisit = useCallback(
+    async (v: VisitRow) => {
+      if (!patientId || !v.appointment.id) return;
+      setStarting(v.appointment.id);
+      try {
+        const encounter = await startWoundCareVisit(medplum, v.appointment, patientId);
+        navigate(`/Patient/${patientId}/Encounter/${encounter.id}`)?.catch(console.error);
+      } catch (err) {
+        console.error('Failed to start visit:', err);
+      } finally {
+        setStarting(null);
+      }
+    },
+    [medplum, navigate, patientId]
+  );
+
   if (loading) {
     return <Document><Text>Loading visits...</Text></Document>;
   }
@@ -89,19 +107,22 @@ export function VisitsTab(): JSX.Element {
         ) : (
           visits.map((v) => {
             const today = isToday(v.appointment.start);
+            const canStartVisit = v.appointment.status === 'booked' && !v.encounter;
+            const hasEncounter = !!v.encounter?.id;
+
             return (
               <Card
                 key={v.appointment.id}
                 withBorder
                 shadow={today ? 'md' : 'sm'}
                 style={{
-                  cursor: v.encounter ? 'pointer' : 'default',
+                  cursor: hasEncounter ? 'pointer' : 'default',
                   borderColor: today ? 'var(--mantine-color-blue-5)' : undefined,
                   borderWidth: today ? 2 : 1,
                 }}
                 onClick={() => {
-                  if (v.encounter?.id) {
-                    navigate(`/Patient/${patientId}/Encounter/${v.encounter.id}`)?.catch(console.error);
+                  if (hasEncounter) {
+                    navigate(`/Patient/${patientId}/Encounter/${v.encounter!.id}`)?.catch(console.error);
                   }
                 }}
               >
@@ -118,12 +139,21 @@ export function VisitsTab(): JSX.Element {
                   </Stack>
 
                   <Group gap="xs">
+                    {canStartVisit && (
+                      <Button
+                        size="xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartVisit(v);
+                        }}
+                        loading={starting === v.appointment.id}
+                      >
+                        Start Visit
+                      </Button>
+                    )}
                     <Badge variant="light" color={getStatusColor(v.encounter?.status || v.appointment.status)}>
                       {v.encounter?.status || v.appointment.status}
                     </Badge>
-                    {!v.encounter && (
-                      <Text size="xs" c="dimmed">No encounter yet</Text>
-                    )}
                   </Group>
                 </Group>
               </Card>
