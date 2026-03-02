@@ -11,6 +11,9 @@ import { showErrorNotification } from '../../utils/notifications';
 
 type IntakeStep = 'cle16' | 'cle287' | 'done';
 
+// Only Charlie Brown's referral supports the full intake workflow in this demo
+const INTAKE_BUNDLE_ID = 'ereferral-cb';
+
 function findBundleResource<T>(bundle: Bundle, resourceType: string): T | undefined {
   return bundle.entry?.find((e) => e.resource?.resourceType === resourceType)?.resource as T | undefined;
 }
@@ -142,6 +145,11 @@ export function ReferralDetailPage(): JSX.Element {
     loadData();
   }, [loadData]);
 
+  const bundlePatient = useMemo(() => bundle ? findBundleResource<Patient>(bundle, 'Patient') : undefined, [bundle]);
+  const bundlePatientId = bundlePatient?.id;
+  const isIntakeBundle = bundleId === INTAKE_BUNDLE_ID;
+  const isProcessed = bundle?.meta?.tag?.some((t) => t.code === 'processed') ?? false;
+
   const handleCle16Submit = useCallback(async (response: QuestionnaireResponse) => {
     try {
       // Create QuestionnaireResponse
@@ -165,10 +173,11 @@ export function ReferralDetailPage(): JSX.Element {
 
       // Update CLE287 task to ready
       if (taskCle287?.id) {
+        const patientRef = bundlePatientId ? `Patient/${bundlePatientId}` : 'Patient/patient-charlie-brown';
         const updated = await medplum.updateResource({
           ...taskCle287,
           status: 'ready',
-          for: { reference: 'Patient/patient-charlie-brown' },
+          for: { reference: patientRef },
         });
         setTaskCle287(updated);
       }
@@ -177,17 +186,19 @@ export function ReferralDetailPage(): JSX.Element {
     } catch (err) {
       showErrorNotification(normalizeOperationOutcome(err));
     }
-  }, [medplum, taskCle16, taskCle287]);
+  }, [medplum, taskCle16, taskCle287, bundlePatientId]);
 
   const handleCle287Submit = useCallback(async (response: QuestionnaireResponse) => {
     try {
+      const patientRef = bundlePatientId ? `Patient/${bundlePatientId}` : 'Patient/patient-charlie-brown';
+
       // Create QuestionnaireResponse
       await medplum.createResource<QuestionnaireResponse>({
         ...response,
         resourceType: 'QuestionnaireResponse',
         status: 'completed',
         authored: new Date().toISOString(),
-        subject: { reference: 'Patient/patient-charlie-brown' },
+        subject: { reference: patientRef },
       });
 
       // Mark CLE287 task completed
@@ -198,22 +209,25 @@ export function ReferralDetailPage(): JSX.Element {
         });
       }
 
-      // Mark bundle as processed
-      if (bundle?.id) {
+      // Mark the intake bundle as processed (always the Charlie Brown bundle)
+      try {
+        const cbBundle = await medplum.readResource('Bundle', INTAKE_BUNDLE_ID);
         await medplum.updateResource({
-          ...bundle,
+          ...cbBundle,
           meta: {
-            ...bundle.meta,
-            tag: [...(bundle.meta?.tag || []), { system: 'https://bayshore.ca/fhir/tags', code: 'processed' }],
+            ...cbBundle.meta,
+            tag: [...(cbBundle.meta?.tag || []), { system: 'https://bayshore.ca/fhir/tags', code: 'processed' }],
           },
         });
+      } catch {
+        // Ignore if bundle not found
       }
 
       setCurrentStep('done');
     } catch (err) {
       showErrorNotification(normalizeOperationOutcome(err));
     }
-  }, [medplum, taskCle287, bundle]);
+  }, [medplum, taskCle287, bundlePatientId]);
 
   if (loading) {
     return <Document><Text>Loading referral...</Text></Document>;
@@ -221,6 +235,43 @@ export function ReferralDetailPage(): JSX.Element {
 
   if (!bundle) {
     return <Document><Text c="red">Referral not found</Text></Document>;
+  }
+
+  // For non-intake bundles, show read-only referral view
+  if (!isIntakeBundle) {
+    return (
+      <Document>
+        <Stack gap="lg">
+          <Group justify="space-between">
+            <Title order={2}>Referral Details</Title>
+            <Badge
+              variant="light"
+              color={isProcessed ? 'green' : 'orange'}
+              size="lg"
+            >
+              {isProcessed ? 'Active Client' : 'Pending Intake'}
+            </Badge>
+          </Group>
+
+          <ReferralBundleView bundle={bundle} />
+
+          {isProcessed && bundlePatientId && (
+            <Button
+              size="md"
+              onClick={() => navigate(`/Patient/${bundlePatientId}`)?.catch(console.error)}
+            >
+              Go to Patient Profile
+            </Button>
+          )}
+
+          {!isProcessed && (
+            <Alert color="blue" title="Demo Note">
+              In the full application, intake forms would be completed here. In this demo, use Charlie Brown&apos;s referral to experience the full intake workflow.
+            </Alert>
+          )}
+        </Stack>
+      </Document>
+    );
   }
 
   return (
@@ -312,7 +363,7 @@ export function ReferralDetailPage(): JSX.Element {
                   </Alert>
                   <Button
                     size="md"
-                    onClick={() => navigate('/Patient/patient-charlie-brown')?.catch(console.error)}
+                    onClick={() => navigate(`/Patient/${bundlePatientId || 'patient-charlie-brown'}`)?.catch(console.error)}
                   >
                     Go to Patient Profile
                   </Button>

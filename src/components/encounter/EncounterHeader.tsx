@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { ActionIcon, Box, Button, Flex, Group, Menu, Modal, Paper, SegmentedControl, Stack, Text } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Button, Flex, Group, Menu, Modal, Paper, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { formatDate, formatHumanName } from '@medplum/core';
 import type { Encounter, Practitioner, Reference } from '@medplum/fhirtypes';
-import { IconChevronDown, IconLock, IconLockOpen } from '@tabler/icons-react';
+import { IconArrowLeft, IconChevronDown, IconLock, IconLockOpen } from '@tabler/icons-react';
 import type { JSX } from 'react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { ChartNoteStatus } from '../../types/encounter';
 import { SignLockDialog } from './SignLockDialog';
 
@@ -14,6 +15,7 @@ interface EncounterHeaderProps {
   encounter: Encounter;
   practitioner?: Practitioner | undefined;
   chartNoteStatus?: ChartNoteStatus;
+  patientId?: string;
   onStatusChange?: (status: Encounter['status']) => void;
   onTabChange?: (tab: string) => void;
   onSign?: (practitioner: Reference<Practitioner>, lock: boolean) => void;
@@ -25,6 +27,7 @@ export const EncounterHeader = (props: EncounterHeaderProps): JSX.Element => {
     encounter,
     practitioner,
     chartNoteStatus = ChartNoteStatus.Unsigned,
+    patientId,
     onStatusChange,
     onTabChange,
     onSign,
@@ -107,9 +110,26 @@ export const EncounterHeader = (props: EncounterHeaderProps): JSX.Element => {
     return null;
   };
 
+  const navigate = useNavigate();
+
   return (
     <>
       <Paper shadow="sm" p={0}>
+        {patientId && (
+          <Box px="lg" pt="sm">
+            <Anchor
+              size="sm"
+              c="dimmed"
+              onClick={() => navigate(`/Patient/${patientId}`)?.catch(console.error)}
+              style={{ cursor: 'pointer' }}
+            >
+              <Group gap={4}>
+                <IconArrowLeft size={14} />
+                <Text size="sm">Back to Patient</Text>
+              </Group>
+            </Anchor>
+          </Box>
+        )}
         <Flex justify="space-between" align="center" p="lg">
           <Stack gap={0}>
             <Text fw={800} size="lg">

@@ -27,6 +27,8 @@ function getCodingValue(items: QuestionnaireResponseItem[] | undefined, linkId: 
   return undefined;
 }
 
+const WOUND_LOINC_CODES = ['39126-8', '39125-0', '39127-6', '72298-3', '72371-8'];
+
 export async function createWoundObservationsFromCLE34(
   medplum: MedplumClient,
   response: QuestionnaireResponse,
@@ -38,6 +40,20 @@ export async function createWoundObservationsFromCLE34(
   const width = getDecimalValue(items, 'wound-width');
   const depth = getDecimalValue(items, 'wound-depth');
   const tissueType = getCodingValue(items, 'tissue-type');
+
+  // Delete existing wound observations for this encounter to avoid duplicates
+  // (this function may be called on every debounced auto-save)
+  const allObs = await medplum.searchResources('Observation', '_count=500');
+  const existing = allObs.filter(
+    (obs) =>
+      obs.encounter?.reference === `Encounter/${encounterId}` &&
+      obs.code?.coding?.some((c) => WOUND_LOINC_CODES.includes(c.code || ''))
+  );
+  for (const obs of existing) {
+    if (obs.id) {
+      await medplum.deleteResource('Observation', obs.id);
+    }
+  }
 
   const effectiveDateTime = new Date().toISOString();
   const created: Observation[] = [];

@@ -86,7 +86,7 @@ export function WoundTrendChart({ patientId }: WoundTrendChartProps): JSX.Elemen
           <XAxis dataKey="date" />
           <YAxis
             label={{ value: 'Surface Area (cm²)', angle: -90, position: 'insideLeft' }}
-            domain={[0, 'auto']}
+            domain={[-0.5, 'auto']}
           />
           <Tooltip
             formatter={(value: number | string | undefined) => [`${Number(value ?? 0).toFixed(2)} cm²`, 'Surface Area']}
@@ -96,7 +96,7 @@ export function WoundTrendChart({ patientId }: WoundTrendChartProps): JSX.Elemen
             y={0}
             stroke="green"
             strokeDasharray="5 5"
-            label={{ value: 'Goal: 0 cm²', fill: 'green', fontSize: 12 }}
+            label={{ value: 'Goal: 0 cm²', fill: 'green', fontSize: 12, position: 'right' }}
           />
           <Line
             type="monotone"

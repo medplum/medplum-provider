@@ -234,6 +234,7 @@ export const EncounterChart = (props: EncounterChartProps): JSX.Element => {
           encounter={encounter}
           chartNoteStatus={chartNoteStatus}
           practitioner={practitioner}
+          patientId={patientResource.id}
           onStatusChange={handleEncounterStatusChange}
           onTabChange={handleTabChange}
           onSign={handleSign}
