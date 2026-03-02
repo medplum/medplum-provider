@@ -1,5 +1,4 @@
 import { Badge, Button, Card, Divider, Group, Select, Stack, Text, Title } from '@mantine/core';
-import { getReferenceString } from '@medplum/core';
 import type { CarePlan, Goal, PlanDefinition } from '@medplum/fhirtypes';
 import { Document, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
@@ -91,6 +90,15 @@ export function CarePlanTab(): JSX.Element {
                 Generate Care Plan
               </Button>
             </Group>
+          </Card>
+        )}
+
+        {/* Fallback when template was "applied" but no care plan exists */}
+        {templateApplied && !carePlan && (
+          <Card withBorder shadow="sm" p="lg">
+            <Text c="dimmed" ta="center">
+              No care plan found. Complete the referral intake to generate a care plan for this patient.
+            </Text>
           </Card>
         )}
 

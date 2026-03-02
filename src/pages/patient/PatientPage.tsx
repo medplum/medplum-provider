@@ -3,7 +3,7 @@ import { getReferenceString, isOk } from '@medplum/core';
 import type { OperationOutcome } from '@medplum/fhirtypes';
 import { Document, OperationOutcomeAlert, PatientSummary, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Location } from 'react-router';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { usePatient } from '../../hooks/usePatient';
@@ -52,6 +52,27 @@ export function PatientPage(): JSX.Element {
     }
   }, [currentTab, location, tabs]);
 
+  // Hide irrelevant PatientSummary sidebar sections (no props available for this)
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    const hideSections = ['Insurance', 'Labs', 'Sexual Orientation', 'Pharmacies'];
+    const hideSectionElements = (): void => {
+      sidebar.querySelectorAll('[class*="CollapsibleSection"] [class*="title"]').forEach((el) => {
+        if (hideSections.some((s) => el.textContent?.trim() === s)) {
+          const section = el.closest('[class*="CollapsibleSection_root"]') as HTMLElement | null;
+          if (section) section.style.display = 'none';
+        }
+      });
+    };
+    // Run immediately and observe for async rendering
+    hideSectionElements();
+    const observer = new MutationObserver(hideSectionElements);
+    observer.observe(sidebar, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [patient]);
+
   if (outcome && !isOk(outcome)) {
     return (
       <Document>
@@ -71,7 +92,7 @@ export function PatientPage(): JSX.Element {
 
   return (
     <div key={getReferenceString(patient)} className={classes.container}>
-      <div className={classes.sidebar}>
+      <div ref={sidebarRef} className={classes.sidebar}>
         <ScrollArea className={classes.scrollArea}>
           <PatientSummary
             patient={patient}

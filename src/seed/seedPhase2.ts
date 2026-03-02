@@ -15,6 +15,7 @@
  */
 import type { MedplumClient } from '@medplum/core';
 import type {
+  AllergyIntolerance,
   Appointment,
   BodyStructure,
   Bundle,
@@ -26,6 +27,7 @@ import type {
   Consent,
   Encounter,
   Goal,
+  MedicationRequest,
   MedicationStatement,
   Observation,
   Patient,
@@ -56,10 +58,24 @@ function extractAllOfType<T>(resourceType: string): T[] {
 }
 
 export async function seedPhase2(medplum: MedplumClient): Promise<void> {
-  // 1. Patient
+  // 1. Patient (enriched with additional demographics)
   const patient = extractResource<Patient>('Patient', 'patient-charlie-brown');
   patient.generalPractitioner = [{ reference: 'Practitioner/dr-alpha' }];
   patient.managingOrganization = { reference: 'Organization/bayshore-ics-mississauga' };
+  patient.maritalStatus = {
+    coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-MaritalStatus', code: 'W', display: 'Widowed' }],
+  };
+  patient.communication = [{
+    language: { coding: [{ system: 'urn:ietf:bcp:47', code: 'en', display: 'English' }] },
+    preferred: true,
+  }];
+  // Ensure email telecom exists
+  if (!patient.telecom?.find((t) => t.system === 'email')) {
+    patient.telecom = [
+      ...(patient.telecom || []),
+      { system: 'email', value: 'charlie.brown@email.ca' },
+    ];
+  }
   await medplum.createResource(patient);
 
   // 2. ServiceRequest
@@ -71,11 +87,14 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
   };
   await medplum.createResource(sr);
 
-  // 3. Condition
+  // 3. Condition (with problem-list-item category for sidebar)
   const condition = extractResource<Condition>('Condition', 'condition-wound-cb');
   condition.clinicalStatus = {
     coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }],
   };
+  condition.category = [{
+    coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item', display: 'Problem List Item' }],
+  }];
   condition.abatementDateTime = undefined;
   await medplum.createResource(condition);
 
@@ -261,6 +280,40 @@ export async function seedPhase2(medplum: MedplumClient): Promise<void> {
     ms.effectivePeriod = { start: todayPlus(-7), end: todayPlus(21) };
     await medplum.createResource(ms);
   }
+
+  // 11b. MedicationRequests (for PatientSummary sidebar which queries MedicationRequest)
+  const medRequests: MedicationRequest[] = medStmts
+    .filter((ms) => ms.status === 'active')
+    .map((ms) => ({
+      resourceType: 'MedicationRequest' as const,
+      status: 'active' as const,
+      intent: 'order' as const,
+      medicationCodeableConcept: ms.medicationCodeableConcept,
+      subject: { reference: 'Patient/patient-charlie-brown' },
+      requester: { reference: 'Practitioner/dr-alpha' },
+      dosageInstruction: ms.dosage,
+    }));
+  for (const mr of medRequests) {
+    await medplum.createResource(mr);
+  }
+
+  // 11c. AllergyIntolerance (NKDA for Charlie Brown)
+  const allergyNKDA: AllergyIntolerance = {
+    resourceType: 'AllergyIntolerance',
+    clinicalStatus: {
+      coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }],
+    },
+    verificationStatus: {
+      coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'confirmed' }],
+    },
+    code: {
+      coding: [{ system: 'http://snomed.info/sct', code: '716186003', display: 'No known allergy' }],
+      text: 'No Known Drug Allergies (NKDA)',
+    },
+    patient: { reference: 'Patient/patient-charlie-brown' },
+    recordedDate: todayPlus(-7),
+  };
+  await medplum.createResource(allergyNKDA);
 
   // 12. QuestionnaireResponses (pre-filled for past visits)
   const qrIds = [

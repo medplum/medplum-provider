@@ -26,7 +26,9 @@ export function ReferralQueuePage(): JSX.Element {
 
   const loadReferrals = useCallback(async () => {
     try {
-      const bundles = await medplum.searchResources('Bundle', 'type=message');
+      // MockClient doesn't support Bundle?type=message, so fetch all and filter client-side
+      const allBundles = await medplum.searchResources('Bundle', '_count=50');
+      const bundles = allBundles.filter((b) => b.type === 'message');
       const rows: ReferralRow[] = bundles.map((bundle) => {
         const patient = findResource<Patient>(bundle, 'Patient');
         const practitioner = findResource<Practitioner>(bundle, 'Practitioner');
