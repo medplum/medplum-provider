@@ -1,3 +1,5 @@
+import type { JSX } from 'react';
+
 interface DynamicTableProps {
   columns: string[];
   rows: string[][];

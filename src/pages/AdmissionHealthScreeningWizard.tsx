@@ -2,6 +2,7 @@ import { createReference } from '@medplum/core';
 import { Encounter, Observation } from '@medplum/fhirtypes';
 import { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
+import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { Callout } from '../components/Callout';
 import { Card, Field, FieldGrid, SectionHeader } from '../components/Card';

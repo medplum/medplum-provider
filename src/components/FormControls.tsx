@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { ChipGroup, ChipOption, Reveal } from './ChipGroup';
 import { CheckGrid } from './CheckGrid';
 import { FormState, parseItems } from '../pages/formState';

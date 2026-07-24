@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { ReactNode, useState } from 'react';
 
 /** Required "official government website" ID banner, collapsed by default. */

@@ -1,5 +1,6 @@
 import { calculateAgeString, formatHumanName } from '@medplum/core';
 import { Patient } from '@medplum/fhirtypes';
+import type { JSX } from 'react';
 import { ReactNode } from 'react';
 
 interface PatientBandProps {

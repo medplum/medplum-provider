@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { ReactNode } from 'react';
 
 interface CalloutProps {
