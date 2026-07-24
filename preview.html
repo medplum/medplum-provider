@@ -13,6 +13,7 @@
   .row{display:flex;flex:1;min-height:0;}
   .main{flex:1;min-width:0;display:flex;flex-direction:column;}
   .note{background:var(--primary-tint);color:var(--primary-dark);font-size:12px;padding:8px 32px;}
+  .warn{background:var(--danger-tint);color:var(--secondary-dark);font-size:12px;padding:8px 32px;font-weight:600;}
   .djs-page{display:none;}
   .djs-page.is-active{display:block;}
 </style>
@@ -40,7 +41,7 @@
   <div class="djs-sidebar-head">
     <p class="eyebrow">Maryland DJS · Health Services</p>
     <h1>Admission Health Screening &amp; Nursing Assessment</h1>
-    <p class="sub">9-part intake · complete at time of admission</p>
+    <p class="sub">4-part intake · complete at time of admission</p>
   </div>
   <ul class="djs-steps" id="steps"></ul>
   <div class="djs-sidebar-foot">
@@ -52,7 +53,7 @@
 </aside>
 
 <div class="main">
-  <div class="note">Static preview — plain HTML/CSS/JS standing in for the real React wizard in src/pages/AdmissionHealthScreeningWizard.tsx. Click a step on the left, or the chips/checkboxes below, to see it respond.</div>
+  <div class="note">Static preview of the current wizard (6 sections, matching src/pages/AdmissionHealthScreeningWizard.tsx).</div>
   <div class="djs-patient-band">
     <div class="djs-patient-id">
       <span class="name">Rivera, Alex M.</span>
@@ -66,11 +67,11 @@
 
   <div class="djs-content" id="content">
 
-    <!-- Section 1 -->
+    <!-- Section 1: Patient Information -->
     <div class="djs-page" data-step="1">
-      <p class="djs-section-desc">Section 1 of 9</p>
+      <p class="djs-section-desc">Section 1 of 4</p>
       <h2 class="djs-section-title">Demographics &amp; Identification</h2>
-      <p class="djs-section-desc">Confirmed at intake — saved to the patient's FHIR Patient resource.</p>
+      <p class="djs-section-desc">Confirmed at intake.</p>
       <div class="djs-card">
         <h3><span class="idx">01</span> Identification</h3>
         <div class="djs-field-grid">
@@ -91,16 +92,48 @@
           <div class="djs-field"><label>Hispanic / Latino</label>
             <div class="djs-chip-group" data-track="hispanic"><button class="djs-chip" type="button">No</button><button class="djs-chip" type="button">Yes</button></div>
           </div>
+          <div class="djs-field"><label>Place of birth</label><input type="text"></div>
+        </div>
+      </div>
+      <div class="djs-card">
+        <h3><span class="idx">03</span> Language &amp; race</h3>
+        <div class="djs-field-grid">
+          <div class="djs-field"><label>Primary language spoken</label>
+            <div class="djs-chip-group" data-track="language"><button class="djs-chip" type="button">English</button><button class="djs-chip" type="button">Spanish</button><button class="djs-chip" type="button">Other</button></div>
+          </div>
+          <div class="djs-field"><label>Interpreter</label>
+            <label class="djs-check-chip"><input type="checkbox">Needs interpreter</label>
+          </div>
+        </div>
+        <div class="djs-check-grid" style="margin-top:14px;">
+          <label class="djs-check-chip"><input type="checkbox">Black or African American</label>
+          <label class="djs-check-chip"><input type="checkbox">White</label>
+          <label class="djs-check-chip"><input type="checkbox">Asian</label>
+          <label class="djs-check-chip"><input type="checkbox">American Indian or Alaska Native</label>
+          <label class="djs-check-chip"><input type="checkbox">Native Hawaiian or Pacific Islander</label>
+          <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
+        </div>
+        <div class="djs-field-grid" style="margin-top:14px;">
+          <div class="djs-field"><label>Color of hair</label><input type="text"></div>
+          <div class="djs-field"><label>Color of eyes</label><input type="text"></div>
+        </div>
+      </div>
+      <div class="djs-card">
+        <h3><span class="idx">04</span> Mandated reporter statement</h3>
+        <p class="hint">Read to the youth: &ldquo;I want you to know that if you report to me or to any DJS staff person that you have been physically or sexually abused, neglected, or sexually assaulted before the age of 18, then we will need to report the incident to child protective services.&rdquo;</p>
+        <div class="djs-field-grid">
+          <div class="djs-field"><label>Statement read</label><label class="djs-check-chip"><input type="checkbox">Statement read to youth</label></div>
+          <div class="djs-field"><label>RN initials</label><input type="text"></div>
         </div>
       </div>
       <button type="button" class="djs-btn">Save demographics</button>
     </div>
 
-    <!-- Section 2 -->
+    <!-- Section 2: Current Health Status -->
     <div class="djs-page" data-step="2">
-      <p class="djs-section-desc">Section 2 of 9</p>
+      <p class="djs-section-desc">Section 2 of 4</p>
       <h2 class="djs-section-title">Current Health Status</h2>
-      <p class="djs-section-desc">Vitals, chief complaint, and pain — each saved as its own Observation.</p>
+      <p class="djs-section-desc">Vitals, chief complaint, and pain.</p>
       <div class="djs-card">
         <h3><span class="idx">01</span> Vital signs</h3>
         <div class="djs-field-grid">
@@ -110,35 +143,51 @@
           <div class="djs-field"><label>BP</label><input type="text" placeholder="120/80"></div>
           <div class="djs-field"><label>Weight (lb)</label><input type="text"></div>
           <div class="djs-field"><label>Height (in)</label><input type="text"></div>
+          <div class="djs-field"><label>BMI (computed)</label><input type="text" readonly placeholder="—"></div>
         </div>
       </div>
       <div class="djs-card">
-        <h3><span class="idx">02</span> Chief complaint</h3>
+        <h3><span class="idx">02</span> Vision screen</h3>
+        <p class="hint">Triage an optometry referral if vision is 20/40 or worse, or for any other vision problem.</p>
+        <table class="djs-dyn">
+          <thead><tr><th></th><th>Left eye</th><th>Right eye</th><th>Both eyes</th></tr></thead>
+          <tbody>
+            <tr><td>Without glasses</td><td><input type="text" placeholder="20/__"></td><td><input type="text" placeholder="20/__"></td><td><input type="text" placeholder="20/__"></td></tr>
+            <tr><td>With glasses/contacts</td><td><input type="text" placeholder="20/__"></td><td><input type="text" placeholder="20/__"></td><td><input type="text" placeholder="20/__"></td></tr>
+          </tbody>
+        </table>
+        <div class="djs-field-grid" style="margin-top:14px;">
+          <div class="djs-field"><label>Given glasses or corrective contact lenses in the past?</label>
+            <div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip" type="button">Yes</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="djs-card">
+        <h3><span class="idx">03</span> Chief complaint</h3>
         <div class="djs-chip-group" data-track="complaint"><button class="djs-chip" type="button">No current complaints</button><button class="djs-chip" type="button">Yes — has a complaint</button></div>
-        <div class="djs-reveal" data-reveal-for="complaint" style="display:none;">
-          <div class="djs-field"><label>Specify</label><textarea></textarea></div>
-        </div>
+        <div class="djs-reveal" data-reveal-for="complaint" style="display:none;"><div class="djs-field"><label>Specify</label><textarea></textarea></div></div>
       </div>
       <div class="djs-card">
-        <h3><span class="idx">03</span> Pain</h3>
+        <h3><span class="idx">04</span> Pain</h3>
         <div class="djs-chip-group" data-track="pain"><button class="djs-chip" type="button">No pain</button><button class="djs-chip" type="button">Yes — has pain</button></div>
         <div class="djs-reveal" data-reveal-for="pain" style="display:none;">
           <div class="djs-field-grid">
-            <div class="djs-field wide"><label>Pain scale (0 – no pain, 10 – worst possible)</label><input type="range" min="0" max="10" value="4"></div>
+            <div class="djs-field wide"><label>Pain scale (0–10)</label><input type="range" min="0" max="10" value="4"></div>
             <div class="djs-field wide"><label>Describe location &amp; nature of pain</label><textarea></textarea></div>
           </div>
         </div>
       </div>
-      <button type="button" class="djs-btn">Save health status</button>
-    </div>
-
-    <!-- Section 3 -->
-    <div class="djs-page" data-step="3">
-      <p class="djs-section-desc">Section 3 of 9</p>
-      <h2 class="djs-section-title">Allergies &amp; Chronic Conditions</h2>
-      <p class="djs-section-desc">Anything flagged here should also be reflected on the chart cover and problem list.</p>
       <div class="djs-card">
-        <h3><span class="idx">01</span> Allergies</h3>
+        <h3><span class="idx">05</span> Current medications / supplements</h3>
+        <p class="hint">Is the youth prescribed or taking any medication?</p>
+        <table class="djs-dyn">
+          <thead><tr><th>Medication name</th><th>Dosage</th><th>Frequency</th><th>Reason for med</th><th>Prescriber</th><th>Last taken</th><th></th></tr></thead>
+          <tbody><tr><td><input type="text"></td><td><input type="text"></td><td><input type="text"></td><td><input type="text"></td><td><input type="text"></td><td><input type="text"></td><td><button class="djs-btn rm-row" type="button">✕</button></td></tr></tbody>
+        </table>
+        <button type="button" class="djs-btn">+ Add medication</button>
+      </div>
+      <div class="djs-card">
+        <h3><span class="idx">06</span> Allergies</h3>
         <div class="djs-check-grid">
           <label class="djs-check-chip"><input type="checkbox">No known allergies</label>
           <label class="djs-check-chip"><input type="checkbox">Latex allergy</label>
@@ -146,14 +195,18 @@
           <label class="djs-check-chip"><input type="checkbox">Insect allergy (bee, wasp, ant)</label>
           <label class="djs-check-chip"><input type="checkbox">Food allergy</label>
           <label class="djs-check-chip"><input type="checkbox">Environmental (dust, mold)</label>
+          <label class="djs-check-chip"><input type="checkbox">Seasonal (pollen, grass)</label>
           <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
         </div>
         <div class="djs-field-grid" style="margin-top:14px;">
           <div class="djs-field wide"><label>Specify allergen(s) &amp; reaction</label><textarea placeholder="e.g. Penicillin — hives; Peanuts — anaphylaxis"></textarea></div>
         </div>
+        <div class="djs-field" style="margin-top:8px;"><label>Ever used / prescribed an Epi-Pen?</label>
+          <div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip" type="button">Yes</button></div>
+        </div>
       </div>
       <div class="djs-card">
-        <h3><span class="idx">02</span> Chronic health conditions</h3>
+        <h3><span class="idx">07</span> Chronic health conditions</h3>
         <div class="djs-chip-group" data-track="chronic"><button class="djs-chip" type="button">No chronic conditions</button><button class="djs-chip" type="button">Yes — has one or more</button></div>
         <div class="djs-reveal" data-reveal-for="chronic" style="display:none;">
           <div class="djs-check-grid">
@@ -165,44 +218,13 @@
             <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
           </div>
           <div class="djs-field-grid" style="margin-top:14px;">
+            <div class="djs-field wide"><label>Doctors / specialists managing these conditions</label><input type="text"></div>
             <div class="djs-field wide"><label>Primary care provider (if known)</label><input type="text"></div>
           </div>
         </div>
       </div>
-      <button type="button" class="djs-btn">Save allergies &amp; chronic conditions</button>
-    </div>
-
-    <!-- Section 4 -->
-    <div class="djs-page" data-step="4">
-      <p class="djs-section-desc">Section 4 of 9</p>
-      <h2 class="djs-section-title">Skin / Body Examination</h2>
-      <p class="djs-section-desc">Check any findings, then note location.</p>
       <div class="djs-card">
-        <h3><span class="idx">01</span> Findings</h3>
-        <div class="djs-check-grid">
-          <label class="djs-check-chip"><input type="checkbox">Bruises</label>
-          <label class="djs-check-chip"><input type="checkbox">Tattoo</label>
-          <label class="djs-check-chip"><input type="checkbox">Scar</label>
-          <label class="djs-check-chip"><input type="checkbox">Needle / track marks</label>
-          <label class="djs-check-chip"><input type="checkbox">Laceration / wound</label>
-          <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
-        </div>
-      </div>
-      <div class="djs-card">
-        <h3><span class="idx">02</span> Body chart</h3>
-        <p class="hint">Full body-map click-to-place markers weren't carried over from the mockup (it was visual-only there too) — capture location in the notes field for now.</p>
-        <div class="djs-field"><label>Location notes for findings above</label><textarea></textarea></div>
-      </div>
-      <button type="button" class="djs-btn">Save skin/body exam</button>
-    </div>
-
-    <!-- Section 5 -->
-    <div class="djs-page" data-step="5">
-      <p class="djs-section-desc">Section 5 of 9</p>
-      <h2 class="djs-section-title">Appearance, Mental Status &amp; Psychosocial History</h2>
-      <div class="djs-callout amber"><span class="ic">⚠</span><span>Contact Behavioral Health staff immediately if the youth reports current suicidal or homicidal ideation.</span></div>
-      <div class="djs-card" style="margin-top:14px;">
-        <h3><span class="idx">01</span> Appearance &amp; mental status</h3>
+        <h3><span class="idx">08</span> Appearance &amp; mental status</h3>
         <div class="djs-check-grid">
           <label class="djs-check-chip"><input type="checkbox">Alert</label>
           <label class="djs-check-chip"><input type="checkbox">Cooperative</label>
@@ -212,103 +234,62 @@
           <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
         </div>
       </div>
-      <div class="djs-card">
-        <h3><span class="idx">02</span> Suicidal / homicidal ideation</h3>
-        <div class="djs-field-grid">
-          <div class="djs-field"><label>Current suicidal ideation?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip danger" type="button">Yes</button></div></div>
-          <div class="djs-field"><label>Current homicidal ideation?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip danger" type="button">Yes</button></div></div>
-        </div>
-      </div>
-      <div class="djs-card">
-        <h3><span class="idx">03</span> Previous placements or detention</h3>
-        <div class="djs-chip-group" data-track="placements"><button class="djs-chip" type="button">No previous placements</button><button class="djs-chip" type="button">Yes — has history</button></div>
-      </div>
-      <button type="button" class="djs-btn">Save mental status &amp; psychosocial</button>
+      <button type="button" class="djs-btn">Save health status</button>
     </div>
 
-    <!-- Section 6 -->
-    <div class="djs-page" data-step="6">
-      <p class="djs-section-desc">Section 6 of 9</p>
-      <h2 class="djs-section-title">Abuse, Substance Use &amp; Family History</h2>
-      <div class="djs-callout red"><span class="ic">📋</span><span>Mandated reporting obligations apply — follow your facility's protocol for any disclosure of current abuse.</span></div>
-      <div class="djs-card" style="margin-top:14px;">
-        <h3><span class="idx">01</span> Abuse history</h3>
-        <div class="djs-field-grid">
-          <div class="djs-field"><label>History of physical abuse?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip danger" type="button">Yes</button></div></div>
-          <div class="djs-field"><label>History of sexual abuse?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip danger" type="button">Yes</button></div></div>
-          <div class="djs-field"><label>History of neglect?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip danger" type="button">Yes</button></div></div>
-        </div>
-      </div>
+    <!-- Section 3: Review of Systems -->
+    <div class="djs-page" data-step="3">
+      <p class="djs-section-desc">Section 3 of 4</p>
+      <h2 class="djs-section-title">Review of Systems &amp; Past Medical History</h2>
       <div class="djs-card">
-        <h3><span class="idx">02</span> Substance use</h3>
+        <h3><span class="idx">01</span> Injuries / trauma</h3>
         <div class="djs-check-grid">
-          <label class="djs-check-chip"><input type="checkbox">Alcohol</label>
-          <label class="djs-check-chip"><input type="checkbox">Marijuana</label>
-          <label class="djs-check-chip"><input type="checkbox">Vaping / nicotine</label>
-          <label class="djs-check-chip"><input type="checkbox">Opioids</label>
+          <label class="djs-check-chip"><input type="checkbox">Head injury / concussion</label>
+          <label class="djs-check-chip"><input type="checkbox">Neck / spine injury</label>
+          <label class="djs-check-chip"><input type="checkbox">Fractures</label>
+          <label class="djs-check-chip"><input type="checkbox">Gun-shot wounds</label>
+          <label class="djs-check-chip"><input type="checkbox">No significant injury or trauma in past</label>
           <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
         </div>
+        <div class="djs-field-grid" style="margin-top:10px;"><div class="djs-field wide"><label>Details, dates, treatment</label><textarea></textarea></div></div>
+        <label class="djs-check-chip" style="margin-top:10px;"><input type="checkbox">Reviewed firearm safety tips with youth</label>
+        <div class="djs-callout amber" style="margin-top:8px;"><span class="ic">⚠</span><span>Firearm safety reviewed with youth: no guns in a home where kids/teens live or visit is safest; if present, guns unloaded &amp; locked separately from ammunition.</span></div>
       </div>
       <div class="djs-card">
-        <h3><span class="idx">03</span> Family history</h3>
-        <table class="djs-dyn">
-          <thead><tr><th>Relation</th><th>Condition</th><th>Notes</th><th></th></tr></thead>
-          <tbody><tr><td><input type="text"></td><td><input type="text"></td><td><input type="text"></td><td><button class="djs-btn rm-row" type="button">✕</button></td></tr></tbody>
-        </table>
-        <button type="button" class="djs-btn">+ Add row</button>
-      </div>
-      <button type="button" class="djs-btn" style="margin-top:14px;">Save abuse, substance &amp; family history</button>
-    </div>
-
-    <!-- Section 7 -->
-    <div class="djs-page" data-step="7">
-      <p class="djs-section-desc">Section 7 of 9</p>
-      <h2 class="djs-section-title">Review of Systems</h2>
-      <div class="djs-card">
-        <h3><span class="idx">01</span> Body systems</h3>
-        <div class="djs-check-grid">
-          <label class="djs-check-chip"><input type="checkbox">Cardiovascular — no complaints</label>
-          <label class="djs-check-chip"><input type="checkbox">Respiratory — no complaints</label>
-          <label class="djs-check-chip"><input type="checkbox">GI — no complaints</label>
-          <label class="djs-check-chip"><input type="checkbox">GU — no complaints</label>
-          <label class="djs-check-chip"><input type="checkbox">Neuro — no complaints</label>
-          <label class="djs-check-chip"><input type="checkbox">MSK — no complaints</label>
+        <h3><span class="idx">03</span> Body systems</h3>
+        <b style="font-size:12.5px;">Oral / dental</b>
+        <div class="djs-check-grid" style="margin-top:8px;">
+          <label class="djs-check-chip"><input type="checkbox">Braces / retainer</label>
+          <label class="djs-check-chip"><input type="checkbox">Has dentures / dental appliance</label>
+          <label class="djs-check-chip"><input type="checkbox">Teeth: broken</label>
+          <label class="djs-check-chip"><input type="checkbox">Gums: bleeding</label>
+          <label class="djs-check-chip"><input type="checkbox">No problems</label>
+          <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
         </div>
+        <div class="djs-field-grid" style="margin-top:10px;"><div class="djs-field"><label>Last dental exam</label><input type="text"></div></div>
+        <b style="font-size:12.5px;display:block;margin-top:18px;">Eye</b>
+        <div class="djs-field-grid" style="margin-top:8px;">
+          <div class="djs-field"><label>Last vision exam date</label><input type="text"></div>
+          <div class="djs-field"><label>Provider</label><input type="text"></div>
+        </div>
+        <b style="font-size:12.5px;display:block;margin-top:18px;">Infectious disease history</b>
+        <p class="hint">&ldquo;Have you ever had&hellip;?&rdquo;</p>
+        <div class="djs-check-grid">
+          <label class="djs-check-chip"><input type="checkbox">Chicken pox / shingles</label>
+          <label class="djs-check-chip"><input type="checkbox">Lyme disease</label>
+          <label class="djs-check-chip"><input type="checkbox">MRSA</label>
+          <label class="djs-check-chip"><input type="checkbox">Tuberculosis — complete DJS TB Screening Form</label>
+          <label class="djs-check-chip"><input type="checkbox">No problems</label>
+          <label class="djs-check-chip other-item"><input type="checkbox">Other:<input type="text"></label>
+        </div>
+        <div class="djs-field-grid" style="margin-top:14px;"><div class="djs-field wide"><label>Additional comments (all systems)</label><textarea></textarea></div></div>
       </div>
       <button type="button" class="djs-btn">Save review of systems</button>
     </div>
 
-    <!-- Section 8 -->
-    <div class="djs-page" data-step="8">
-      <p class="djs-section-desc">Section 8 of 9</p>
-      <h2 class="djs-section-title">Reproductive Health</h2>
-      <div class="djs-card">
-        <h3><span class="idx">00</span> Assessment type</h3>
-        <div class="djs-chip-group" data-track="reprosex"><button class="djs-chip" type="button">Male assessment</button><button class="djs-chip" type="button">Female assessment</button></div>
-      </div>
-      <div class="djs-card">
-        <h3><span class="idx">F3</span> Sexual history</h3>
-        <div class="djs-chip-group" data-track="sexhx"><button class="djs-chip" type="button">No to all</button><button class="djs-chip" type="button">Yes</button></div>
-        <div class="djs-reveal" data-reveal-for="sexhx" style="display:none;">
-          <div class="djs-field-grid">
-            <div class="djs-field"><label># Partners (lifetime)</label><input type="text"></div>
-            <div class="djs-field"><label>Age at first intercourse</label><input type="text"></div>
-            <div class="djs-field"><label>Condom used at last intercourse?</label><div class="djs-chip-group"><button class="djs-chip" type="button">No</button><button class="djs-chip" type="button">Yes</button></div></div>
-          </div>
-        </div>
-      </div>
-      <div class="djs-card">
-        <h3><span class="idx">R</span> Follow-up contact</h3>
-        <div class="djs-field-grid">
-          <div class="djs-field"><label>Best phone number for lab results</label><input type="tel"></div>
-        </div>
-      </div>
-      <button type="button" class="djs-btn">Save reproductive health</button>
-    </div>
-
-    <!-- Section 9 -->
-    <div class="djs-page" data-step="9">
-      <p class="djs-section-desc">Section 9 of 9</p>
+    <!-- Section 6: Nursing Diagnosis & Disposition -->
+    <div class="djs-page" data-step="4">
+      <p class="djs-section-desc">Section 4 of 4</p>
       <h2 class="djs-section-title">Nursing Diagnosis &amp; Disposition</h2>
       <div class="djs-card">
         <h3><span class="idx">01</span> Nursing diagnosis</h3>
@@ -323,8 +304,12 @@
         <div class="djs-check-grid">
           <label class="djs-check-chip"><input type="checkbox">DJS TB Screening Form initiated</label>
           <label class="djs-check-chip"><input type="checkbox">Labs obtained per DJS Admission Lab Protocol</label>
+          <label class="djs-check-chip"><input type="checkbox">Scheduled for Admission History / Physical Exam</label>
           <label class="djs-check-chip"><input type="checkbox">Cleared for general population</label>
-          <label class="djs-check-chip"><input type="checkbox">Admitted to infirmary</label>
+        </div>
+        <div class="djs-field-grid" style="margin-top:14px;">
+          <div class="djs-field wide"><label>Health status alerts (document allergies on chart cover &amp; problem list too)</label><textarea></textarea></div>
+          <div class="djs-field wide"><label>Additional notes on referrals, logs, or records requested</label><textarea></textarea></div>
         </div>
       </div>
       <div class="djs-card">
@@ -332,6 +317,8 @@
         <div class="djs-field-grid">
           <div class="djs-field"><label>Nurse's signature (typed name)</label><input type="text"></div>
           <div class="djs-field"><label>Date &amp; time completed</label><input type="datetime-local"></div>
+          <div class="djs-field"><label>Physician's signature (typed name)</label><input type="text"></div>
+          <div class="djs-field"><label>Review date</label><input type="date"></div>
         </div>
       </div>
       <button type="button" class="djs-btn">Save diagnosis &amp; disposition</button>
@@ -349,22 +336,17 @@
     </div>
     <div class="md-app-footer__col">
       <strong>Policies</strong>
-      <ul>
-        <li><a href="#">Accessibility</a></li>
-        <li><a href="#">Privacy and Security</a></li>
-        <li><a href="#">Terms of Use</a></li>
-      </ul>
+      <ul><li><a href="#">Accessibility</a></li><li><a href="#">Privacy and Security</a></li><li><a href="#">Terms of Use</a></li></ul>
     </div>
   </div>
   <div class="md-app-footer__bottom">© 2026 State of Maryland. All rights reserved.</div>
 </footer>
 
 <script>
-  const STEPS = ["Demographics","Current Health Status","Allergies & Chronic","Skin / Body Exam","Mental Status & Psychosocial","Abuse, Substance & Family","Review of Systems","Reproductive Health","Diagnosis & Disposition"];
+  const STEPS = ["Patient Information","Current Health Status","Review of Systems","Diagnosis & Disposition"];
   const stepsEl = document.getElementById('steps');
   const touched = new Set([1]);
   let activeStep = 1;
-
   const tracked = { sex: null, hispanic: null, complaint: null, pain: null };
 
   function renderSteps() {
@@ -414,9 +396,7 @@
           updateProgress();
         }
         const reveal = document.querySelector(`[data-reveal-for="${track}"]`);
-        if (reveal) {
-          reveal.style.display = idx === 1 ? '' : 'none';
-        }
+        if (reveal) reveal.style.display = idx === 1 ? '' : 'none';
       });
     });
   });

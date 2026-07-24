@@ -64,7 +64,7 @@ is stubbed. The resource mapping actually used, per section, is below
 | 6. Abuse, Substance & Family | abuse history, substance use, family hx | `Observation` or `Condition` for abuse history (handle with the same access-policy sensitivity as any disclosure), `Observation` per substance (SNOMED-coded), `FamilyMemberHistory` |
 | 7. Review of Systems | systems checklist | `Observation`, one per system reviewed, or a single `QuestionnaireResponse` if you'd rather keep ROS as one structured form |
 | 8. Reproductive Health | male/female-specific fields | `Observation` (LMP, contraception, etc.), gated on `Patient.gender` |
-| 9. Diagnosis & Disposition | nursing plan, sign-off | `Condition` (diagnoses), `CarePlan` or `ServiceRequest` (referrals/orders), `Provenance` or `Composition` signature for the sign-off block |
+| 9. Diagnosis & Disposition | nursing plan, sign-off | `Condition` (diagnoses); `ServiceRequest` per lab and per referral (implemented); `Observation` for PPD/health-ed/MD-contacted events (implemented); `CarePlan.activity[]` for everything else (implemented); sign-off is still a plain `Observation`, not a real `Provenance`/`Composition` signature — that upgrade is still open |
 
 For anything checklist-like (races, allergies, substances, ROS systems),
 consider whether you actually want one `Observation` per checked item
@@ -135,6 +135,48 @@ preview.html                 — static HTML/CSS preview, no build step
   whatever font-loading approach `medplum-provider` already uses.
 
 ## Changelog
+
+- **Merged Sections 3 and 4 into the bottom of Section 2** (down from 6
+  sections to 4): Allergies, Chronic Health Conditions, and Appearance &
+  Mental Status are now cards within "Current Health Status" alongside
+  vitals/vision/complaint/pain/medications, rather than their own steps.
+  One combined "Save health status" button now calls `saveVitals`,
+  `saveAllergiesChronic`, and `saveMentalStatus` in sequence. Review of
+  Systems and Nursing Diagnosis & Disposition renumbered to Sections 3
+  and 4 accordingly.
+
+- **Scope narrowed (intentional):** Skin/Body Examination, Abuse/Substance/Family
+  History (including the Phase 2 substance grid and Phase 3 Task-based
+  compliance deadline), and Reproductive Health were removed entirely —
+  down from 9 sections to 6. Nursing Plan/Disposition was also reverted
+  from Phase 6's structured `ServiceRequest`-per-lab/referral model back
+  to a flat checklist. Cleaned up leftover debris from that edit: an
+  orphaned `SubstanceUseGrid`/`SUBSTANCES` import, dead code in
+  `saveMentalStatus` referencing `mh-dx`/`si-now`/`si-hist` fields that
+  no longer have any input UI, a trailing-`|` bug that rendered a blank
+  labelless checkbox in Nursing Plan, and two typos ("Iatient
+  Information", a trailing space in Section 4's title).
+- Section 4's description text still warns staff to contact Behavioral
+  Health for current SI/HI — left as-is since removing a safety-warning
+  line is a more deliberate call than a typo fix, but it's now
+  describing a check the form doesn't actually perform.
+
+- **Phase 6 (Nursing Plan/Disposition):** replaced the flat 18-item
+  checklist (which flattened everything into one `CarePlan.description`
+  string) with the real form's actual structure: specific labs
+  (Urine GC/Chlamydia, rapid pregnancy test, prenatal labs, drug screen,
+  CBC/RPR/HIV/MMR, Hep C Ab, lead level) each become their own real
+  `ServiceRequest`; specific referrals (Behavioral Health, CPS, Dentist,
+  Optometrist, Psychiatrist, Gyn/Midwife) each become their own
+  `ServiceRequest` with `performerType` carrying the specialty; PPD
+  result, health-education topics, and both MD/NP-contacted events
+  become individual `Observation`s with real timestamps; everything
+  else (TB screening initiated, sick call, logs, disposition, special
+  needs) is a structured `CarePlan.activity[]` list instead of one
+  flattened string.
+- Fixed three more silently-dropped fields in the same section:
+  `disposition-notes`, `signoff-datetime`, and `review-date` were
+  captured in state but never included in the save handler.
 
 - **Phase 4 (Page 1 & vitals gaps):** added everything the real form has
   that the build didn't — place of birth, primary language + needs-interpreter,
