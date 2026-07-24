@@ -13,6 +13,7 @@ import {
   IconPrinter,
   IconQrcode,
   IconSettingsAutomation,
+  IconStethoscope,
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
@@ -28,6 +29,7 @@ import { ScriptSurePracticeProvider } from './scriptsure/ScriptSurePractice';
 const SETUP_DISMISSED_KEY = 'medplum-provider-setup-completed';
 const PROVIDER_HIDE_GET_STARTED_SETTING = 'hideGetStarted';
 
+import { AdmissionHealthScreeningWizard } from './pages/AdmissionHealthScreeningWizard';
 import { EncounterChartPage } from './pages/encounter/EncounterChartPage';
 import { EncounterModal } from './pages/encounter/EncounterModal';
 import { FaxPage } from './pages/fax/FaxPage';
@@ -149,6 +151,7 @@ export function App(): JSX.Element | null {
                       ]
                     : []),
                   { icon: <IconUserPlus />, label: 'New Patient', href: '/onboarding' },
+                  { icon: <IconStethoscope />, label: 'Admission Screening', href: '/admission-screening' },
                   { icon: <IconApps />, label: 'Integrations', href: '/integrations' },
                   ...(hasDoseSpot
                     ? [
@@ -245,6 +248,19 @@ export function App(): JSX.Element | null {
               <Route path="/Fax/Communication" element={<FaxPage />} />
               <Route path="/Fax/Communication/:faxId" element={<FaxPage />} />
               <Route path="/onboarding" element={<IntakeFormPage />} />
+              {/*
+                DJS Admission Health Screening. Rendered inside the AppShell for
+                now — the wizard draws its own gov banner/header/sidebar/footer,
+                so the chrome nests. Pulling it out of the AppShell is deferred;
+                function first. Patient/encounter are optional: with no
+                patientId the wizard creates a new Patient on first save.
+              */}
+              <Route path="/admission-screening" element={<AdmissionHealthScreeningWizard />} />
+              <Route path="/admission-screening/:patientId" element={<AdmissionHealthScreeningWizard />} />
+              <Route
+                path="/admission-screening/:patientId/:encounterId"
+                element={<AdmissionHealthScreeningWizard />}
+              />
               <Route path="/Calendar/Schedule" element={<SchedulePage />} />
               <Route path="/Calendar/Schedule/:id" element={<SchedulePage />} />
               <Route path="/Calendar/Schedule/:id/settings" element={<ScheduleSettingsPage />} />

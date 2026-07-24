@@ -4,6 +4,8 @@ import { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
+import { useParams } from 'react-router';
+import '../theme/tokens.css';
 import { Callout } from '../components/Callout';
 import { Card, Field, FieldGrid, SectionHeader } from '../components/Card';
 import { ChipGroup, Reveal } from '../components/ChipGroup';
@@ -12,6 +14,7 @@ import { Grid, YesNoChip } from '../components/FormControls';
 import { AppFooter, AppHeader, GovBanner } from '../components/MarylandChrome';
 import { PatientBand } from '../components/PatientBand';
 import { SidebarStepper, WizardStep } from '../components/SidebarStepper';
+import { showErrorNotification, showSuccessNotification } from '../utils/notifications';
 import { useFormState } from './formState';
 
 const STEPS: WizardStep[] = [
@@ -22,7 +25,9 @@ const STEPS: WizardStep[] = [
 ];
 
 interface Props {
+  /** Overrides the route param, for embedding the wizard inside another page. */
   patientId?: string;
+  /** Overrides the route param, for embedding the wizard inside another page. */
   encounterId?: string;
 }
 
@@ -36,10 +41,20 @@ interface Props {
  * mostly large checklists/chip-groups/dynamic tables — see each
  * section's save handler for exactly which FHIR resources it produces.
  */
-export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props): JSX.Element {
+export function AdmissionHealthScreeningWizard({
+  patientId: patientIdProp,
+  encounterId: encounterIdProp,
+}: Props): JSX.Element {
+  // Props win when the wizard is embedded in another page; otherwise fall
+  // back to the route params so it works as a standalone route.
+  const params = useParams();
+  const patientId = patientIdProp ?? params.patientId;
+  const encounterId = encounterIdProp ?? params.encounterId;
+
   const medplum = useMedplum();
   const [activeStep, setActiveStep] = useState(1);
   const [touched, setTouched] = useState<Set<number>>(new Set([1]));
+  const [savingSection, setSavingSection] = useState<string | null>(null);
   const form = useFormState();
 
   const [patient, setPatient] = useState<Patient | undefined>();
@@ -64,7 +79,10 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
   const [hasComplaint, setHasComplaint] = useState<string>();
   const [complaintDetail, setComplaintDetail] = useState('');
   const [hasPain, setHasPain] = useState<string>();
-  const [painScale, setPainScale] = useState(0);
+  // Deliberately starts undefined, not 0: on a 0–10 scale, 0 means "no pain",
+  // which is a real clinical finding. An untouched slider must stay
+  // distinguishable from a recorded score of zero.
+  const [painScale, setPainScale] = useState<number>();
   const [painDetail, setPainDetail] = useState('');
 
   useEffect(() => {
@@ -85,6 +103,25 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
   function goTo(n: number) {
     setActiveStep(n);
     setTouched((prev) => new Set(prev).add(n));
+  }
+
+  /**
+   * Wraps a section's save handler with a pending state and success/error
+   * notifications. Without this, the handlers were fired as floating
+   * promises: a rejected save (expired session, validation error, network
+   * failure) looked exactly like a successful one — nothing happened either
+   * way, so there was no way to tell from the UI whether data landed.
+   */
+  async function runSave(key: string, successMessage: string, save: () => Promise<void>): Promise<void> {
+    setSavingSection(key);
+    try {
+      await save();
+      showSuccessNotification({ title: 'Saved', message: successMessage });
+    } catch (err) {
+      showErrorNotification(err);
+    } finally {
+      setSavingSection(null);
+    }
   }
 
   const subjectRef = patient?.id ? createReference(patient) : undefined;
@@ -182,7 +219,17 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
     if (hasPain === 'yes') {
       await obs({
         code: { text: 'Pain severity - 0-10 verbal numeric rating' },
-        valueInteger: painScale,
+        // Pain was reported, so the Observation is still worth recording even
+        // if no score was captured — but it must not claim a score of 0.
+        // FHIR requires dataAbsentReason instead of value[x], never both.
+        ...(painScale === undefined
+          ? {
+              dataAbsentReason: {
+                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/data-absent-reason', code: 'unknown' }],
+                text: 'Pain reported but no score recorded',
+              },
+            }
+          : { valueInteger: painScale }),
         note: painDetail ? [{ text: painDetail }] : undefined,
       });
     }
@@ -295,7 +342,7 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <div className="djs-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <GovBanner />
       <AppHeader agencyName="Department of Juvenile Services · Health Services" />
 
@@ -366,7 +413,14 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
                     <Field label="RN initials"><input type="text" value={form.text('mandated-reporter-initials')} onChange={(e) => form.setText('mandated-reporter-initials', e.target.value)} /></Field>
                   </FieldGrid>
                 </Card>
-                <button type="button" className="djs-btn" onClick={saveDemographics}>Save demographics</button>
+                <button
+                  type="button"
+                  className="djs-btn"
+                  disabled={savingSection === 'demographics'}
+                  onClick={() => runSave('demographics', 'Demographics saved', saveDemographics)}
+                >
+                  {savingSection === 'demographics' ? 'Saving…' : 'Save demographics'}
+                </button>
               </section>
             )}
 
@@ -425,8 +479,22 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
                   <Reveal show={hasPain === 'yes'}>
                     <FieldGrid>
                       <Field label="Pain scale (0–10)" wide>
-                        <input type="range" min={0} max={10} value={painScale} onChange={(e) => setPainScale(Number(e.target.value))} />
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--muted)' }}>{painScale}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          value={painScale ?? 0}
+                          onChange={(e) => setPainScale(Number(e.target.value))}
+                        />
+                        <span
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                            color: painScale === undefined ? 'var(--muted)' : 'var(--ink)',
+                          }}
+                        >
+                          {painScale === undefined ? 'Not recorded — drag to set a score' : `${painScale} / 10`}
+                        </span>
                       </Field>
                       <Field label="Describe location & nature of pain" wide><textarea value={painDetail} onChange={(e) => setPainDetail(e.target.value)} /></Field>
                     </FieldGrid>
@@ -471,13 +539,16 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
                 <button
                   type="button"
                   className="djs-btn"
-                  onClick={async () => {
-                    await saveVitals();
-                    await saveAllergiesChronic();
-                    await saveMentalStatus();
-                  }}
+                  disabled={savingSection === 'health-status'}
+                  onClick={() =>
+                    runSave('health-status', 'Health status saved', async () => {
+                      await saveVitals();
+                      await saveAllergiesChronic();
+                      await saveMentalStatus();
+                    })
+                  }
                 >
-                  Save health status
+                  {savingSection === 'health-status' ? 'Saving…' : 'Save health status'}
                 </button>
               </section>
             )}
@@ -519,7 +590,14 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
                   </div>
                   <Field label="Additional comments (all systems)" wide><textarea value={form.text('ros-comments')} onChange={(e) => form.setText('ros-comments', e.target.value)} /></Field>
                 </Card>
-                <button type="button" className="djs-btn" onClick={saveReviewOfSystems}>Save review of systems</button>
+                <button
+                  type="button"
+                  className="djs-btn"
+                  disabled={savingSection === 'ros'}
+                  onClick={() => runSave('ros', 'Review of systems saved', saveReviewOfSystems)}
+                >
+                  {savingSection === 'ros' ? 'Saving…' : 'Save review of systems'}
+                </button>
               </section>
             )}
             {activeStep === 4 && (
@@ -548,7 +626,14 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
                     <Field label="Review date"><input type="date" value={form.text('review-date')} onChange={(e) => form.setText('review-date', e.target.value)} /></Field>
                   </FieldGrid>
                 </Card>
-                <button type="button" className="djs-btn" onClick={saveDiagnosisDisposition}>Save diagnosis & disposition</button>
+                <button
+                  type="button"
+                  className="djs-btn"
+                  disabled={savingSection === 'disposition'}
+                  onClick={() => runSave('disposition', 'Diagnosis & disposition saved', saveDiagnosisDisposition)}
+                >
+                  {savingSection === 'disposition' ? 'Saving…' : 'Save diagnosis & disposition'}
+                </button>
               </section>
             )}
           </div>

@@ -52,7 +52,14 @@
   --font-mono: 'Roboto Mono', monospace;
 }
 
-body {
+/*
+ * Scoped to .djs-root rather than `body` on purpose: this stylesheet is
+ * imported globally (Vite applies plain .css app-wide regardless of which
+ * module imports it), so a bare `body` rule would restyle every existing
+ * medplum-provider page. Keep the wizard's typography/background confined
+ * to its own subtree.
+ */
+.djs-root {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
@@ -239,6 +246,10 @@ table.djs-dyn input, table.djs-dyn select {
   cursor: pointer; margin-top: 10px; display: inline-flex; align-items: center; gap: 6px;
 }
 .djs-btn:hover { background: var(--primary-tint); }
+.djs-btn:disabled {
+  border-color: var(--border); color: var(--muted);
+  background: var(--surface-2); cursor: progress;
+}
 .djs-btn.ghost { border-color: var(--border); color: var(--muted); }
 .djs-btn.rm-row { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 2px 6px; }
 
