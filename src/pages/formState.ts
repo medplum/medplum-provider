@@ -15,7 +15,7 @@ export function parseItems(spec: string): CheckGridItem[] {
 
 /**
  * Generic state container for the wizard's checklist/chip/table-heavy
- * sections (3–9), so each section doesn't need its own pile of
+ * sections (3–4), so each section doesn't need its own pile of
  * useState calls. Keyed by arbitrary string IDs matching the mockup's
  * own data-track / data-grid / field IDs.
  */

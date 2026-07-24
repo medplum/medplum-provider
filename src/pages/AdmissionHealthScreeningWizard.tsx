@@ -6,13 +6,12 @@ import { useEffect, useState } from 'react';
 import { Callout } from '../components/Callout';
 import { Card, Field, FieldGrid, SectionHeader } from '../components/Card';
 import { ChipGroup, Reveal } from '../components/ChipGroup';
-import { CheckGrid } from '../components/CheckGrid';
 import { DynamicTable } from '../components/DynamicTable';
-import { Grid, TrackedChip, YesNoChip } from '../components/FormControls';
+import { Grid, YesNoChip } from '../components/FormControls';
 import { AppFooter, AppHeader, GovBanner } from '../components/MarylandChrome';
 import { PatientBand } from '../components/PatientBand';
 import { SidebarStepper, WizardStep } from '../components/SidebarStepper';
-import { parseItems, useFormState } from './formState';
+import { useFormState } from './formState';
 
 const STEPS: WizardStep[] = [
   { n: 1, title: 'Patient Information' },
@@ -27,11 +26,11 @@ interface Props {
 }
 
 /**
- * Full 9-section Admission Health Screening & Nursing Assessment wizard,
+ * 4-section Admission Health Screening & Nursing Assessment wizard,
  * styled to match the supplied mockup and wired to Medplum FHIR resources.
  *
  * Sections 1–2 use dedicated typed state (they map onto core Patient
- * fields + a handful of well-known Observation codes). Sections 3–9 use
+ * fields + a handful of well-known Observation codes). Sections 3–4 use
  * the generic `useFormState` container (see formState.ts) since they're
  * mostly large checklists/chip-groups/dynamic tables — see each
  * section's save handler for exactly which FHIR resources it produces.
@@ -53,8 +52,6 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
   const [admissionDate, setAdmissionDate] = useState('');
   const [sex, setSex] = useState<string>();
   const [hispanic, setHispanic] = useState<string>();
-  // missing race, place of birth, hair and eye color
-  // languages and needs interpreter
 
   // ---- Section 2 state ----
   const [temp, setTemp] = useState('');
@@ -68,8 +65,6 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
   const [hasPain, setHasPain] = useState<string>();
   const [painScale, setPainScale] = useState(0);
   const [painDetail, setPainDetail] = useState('');
-// missing vision information
-
 
   useEffect(() => {
     if (patientId) {
@@ -207,9 +202,9 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
     }
   }
 
-  // ---- Save handlers: Sections 3–6 ----
+  // ---- Save handlers: Sections 3–4 ----
 
-  /** Section 3: allergies -> AllergyIntolerance, chronic conditions -> Condition */
+  /** Current Health Status (allergies card): allergies -> AllergyIntolerance, chronic conditions -> Condition */
   async function saveAllergiesChronic() {
     for (const item of form.checkedItems('allergy')) {
       if (item === 'No known allergies') continue;
@@ -233,26 +228,19 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
     }
   }
 
-  /** Section 5: appearance findings + mental health dx (Condition) + SI/HI screening (flagged Observation) */
+  /** Current Health Status (appearance card): appearance/mental-status findings -> Observation */
   async function saveMentalStatus() {
     for (const item of form.checkedItems('appearance')) {
       await obs({ code: { text: 'Appearance/mental status finding' }, valueString: item });
     }
   }
 
-  /** Section 7: every checked ROS/injury item -> Observation, tagged with its system */
+  /** Section 3 (Review of Systems): every checked ROS/injury item -> Observation, tagged with its system */
   async function saveReviewOfSystems() {
     const systems: [string, string][] = [
       ['injuries', 'Injuries/trauma'],
       ['firearm-safety', 'Injury prevention'],
-      ['mss', 'Musculoskeletal'],
-      ['eye', 'Eye'],
-      ['ent', 'Ears/nose/throat'],
       ['dental', 'Oral/dental'],
-      ['gi', 'GI/nutrition'],
-      ['gu', 'GU/kidney'],
-      ['resp', 'Respiratory/cardiovascular'],
-      ['neuro', 'Neurologic'],
       ['infectious', 'Infectious disease history'],
     ];
     for (const [grid, label] of systems) {
@@ -264,9 +252,18 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
     if (form.text('last-dental-exam')) {
       await obs({ code: { text: 'Last dental exam' }, valueString: form.text('last-dental-exam') });
     }
+    if (form.text('vision-exam-date') || form.text('vision-provider')) {
+      await obs({
+        code: { text: 'Last vision exam' },
+        valueString: `Date: ${form.text('vision-exam-date') || '—'}, provider: ${form.text('vision-provider') || '—'}`,
+      });
+    }
+    if (form.text('ros-comments')) {
+      await obs({ code: { text: 'Review of systems: additional comments' }, valueString: form.text('ros-comments') });
+    }
   }
 
-  /** Section 9: nursing diagnoses -> Condition, plan items -> CarePlan note, sign-off -> Observation w/ note */
+  /** Section 4 (Diagnosis & Disposition): nursing diagnoses -> Condition, plan items -> CarePlan note, sign-off -> Observation w/ note */
   async function saveDiagnosisDisposition() {
     for (const key of ['dx1', 'dx2', 'dx3', 'dx4']) {
       const val = form.text(key);
@@ -305,7 +302,7 @@ export function AdmissionHealthScreeningWizard({ patientId, encounterId }: Props
         <SidebarStepper
           eyebrow="Maryland DJS · Health Services"
           title="Admission Health Screening & Nursing Assessment"
-          subtitle="9-part intake · complete at time of admission"
+          subtitle="4-part intake · complete at time of admission"
           steps={STEPS}
           activeStep={activeStep}
           touchedSteps={touched}
