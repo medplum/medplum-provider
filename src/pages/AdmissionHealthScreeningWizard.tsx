@@ -1,5 +1,5 @@
-import { createReference } from '@medplum/core';
-import { Encounter, Observation } from '@medplum/fhirtypes';
+import { createReference, WithId } from '@medplum/core';
+import { Encounter, Observation, Reference } from '@medplum/fhirtypes';
 import { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
@@ -16,6 +16,16 @@ import { PatientBand } from '../components/PatientBand';
 import { SidebarStepper, WizardStep } from '../components/SidebarStepper';
 import { showErrorNotification, showSuccessNotification } from '../utils/notifications';
 import { useFormState } from './formState';
+
+/**
+ * Every resource this wizard writes carries an identifier under this system,
+ * whose value is derived from the field that produced it. That makes each
+ * resource deterministically addressable, so re-saving a section updates the
+ * existing resource instead of appending a duplicate. Matching is done
+ * server-side by `upsertResource`'s conditional update, which stays correct
+ * even if two people save the same screening concurrently.
+ */
+const SCREENING_ID_SYSTEM = 'http://maryland.gov/djs/admission-screening';
 
 const STEPS: WizardStep[] = [
   { n: 1, title: 'Patient Information' },
@@ -124,23 +134,144 @@ export function AdmissionHealthScreeningWizard({
     }
   }
 
-  const subjectRef = patient?.id ? createReference(patient) : undefined;
   const encounterRef: Encounter['subject'] | undefined = encounterId
     ? { reference: `Encounter/${encounterId}` }
     : undefined;
 
-  async function obs(partial: Partial<Observation>): Promise<void> {
-    await medplum.createResource<Observation>({
-      resourceType: 'Observation',
-      status: 'final',
-      subject: subjectRef,
-      encounter: encounterRef,
-      ...partial,
-    } as Observation);
+  /**
+   * Scopes an upsert to this patient so an identifier can repeat across
+   * patients without colliding. `param` differs by resource type —
+   * AllergyIntolerance searches on `patient`, everything else on `subject`.
+   */
+  function upsertQuery(key: string, subject: Reference<Patient>, param: 'subject' | 'patient' = 'subject') {
+    return { identifier: `${SCREENING_ID_SYSTEM}|${key}`, [param]: subject.reference as string };
   }
 
-  // ---- Save handlers: Sections 1–2 (unchanged) ----
-  async function saveDemographics() {
+  /**
+   * Writes one Observation per screening field.
+   *
+   * The identifier is derived from `code.text` — the same string that defines
+   * what the Observation means — plus `itemKey` for checklist rows, where one
+   * code covers many items. Deriving it rather than hand-writing a key per
+   * call site means the key cannot drift out of sync with the resource it
+   * labels, which is the failure mode this file has a long history of.
+   */
+  async function obs(
+    subject: Reference<Patient>,
+    partial: Partial<Observation>,
+    itemKey?: string
+  ): Promise<void> {
+    const codeText = partial.code?.text ?? 'Unspecified screening finding';
+    const key = itemKey ? `${codeText}::${itemKey}` : codeText;
+    await medplum.upsertResource<Observation>(
+      {
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        encounter: encounterRef,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+        ...partial,
+      } as Observation,
+      upsertQuery(key, subject)
+    );
+  }
+
+  /**
+   * Marks a resource as withdrawn without destroying it. Observation and
+   * MedicationStatement carry `status`; Condition and AllergyIntolerance
+   * express retraction through `verificationStatus` instead.
+   */
+  function asRetracted(res: any): any {
+    switch (res.resourceType) {
+      case 'Observation':
+      case 'MedicationStatement':
+        return { ...res, status: 'entered-in-error' };
+      case 'Condition':
+        return {
+          ...res,
+          verificationStatus: {
+            coding: [
+              { system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'entered-in-error' },
+            ],
+          },
+        };
+      case 'AllergyIntolerance':
+        return {
+          ...res,
+          verificationStatus: {
+            coding: [
+              {
+                system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification',
+                code: 'entered-in-error',
+              },
+            ],
+          },
+        };
+      default:
+        return res;
+    }
+  }
+
+  /** True once a resource has already been withdrawn, so we don't rewrite it. */
+  function isRetracted(res: any): boolean {
+    return (
+      res.status === 'entered-in-error' ||
+      res.verificationStatus?.coding?.some((c: { code?: string }) => c.code === 'entered-in-error') === true
+    );
+  }
+
+  /**
+   * Withdraws resources this section wrote previously that the form no longer
+   * asserts.
+   *
+   * Upsert alone only ever adds or updates. Without this, unchecking an item
+   * left its resource live in the chart while the form showed it gone — the
+   * record kept asserting a finding the nurse had explicitly withdrawn, which
+   * is more dangerous than a duplicate. Retracted via status rather than
+   * deleted, because clinical records need the audit trail.
+   *
+   * `inScope` is what keeps this section-local: without it, saving one section
+   * would retract every other section's findings, since none of their keys
+   * appear in this section's live set.
+   */
+  async function retractStale(
+    resourceType: 'Observation' | 'Condition' | 'AllergyIntolerance' | 'MedicationStatement',
+    subject: Reference<Patient>,
+    inScope: (key: string) => boolean,
+    liveKeys: Set<string>,
+    param: 'subject' | 'patient' = 'subject'
+  ): Promise<void> {
+    // Narrow server-side by identifier system where supported. The
+    // `system|` token form is standard FHIR but not universally implemented,
+    // so fall back to fetching the patient's resources and filtering below —
+    // a rejected search must not take the whole save down with it.
+    let existing;
+    try {
+      existing = await medplum.searchResources(resourceType, {
+        identifier: `${SCREENING_ID_SYSTEM}|`,
+        [param]: subject.reference as string,
+        _count: 200,
+      });
+    } catch {
+      existing = await medplum.searchResources(resourceType, {
+        [param]: subject.reference as string,
+        _count: 200,
+      });
+    }
+
+    for (const res of existing) {
+      const key = res.identifier?.find((i) => i.system === SCREENING_ID_SYSTEM)?.value;
+      if (!key || !inScope(key) || liveKeys.has(key) || isRetracted(res)) {
+        continue;
+      }
+      await medplum.updateResource(asRetracted(res));
+    }
+  }
+
+  // ---- Save handlers: Sections 1–2 ----
+
+  /** Writes the Patient record itself and returns it, with a guaranteed id. */
+  async function savePatientRecord(): Promise<WithId<Patient>> {
     const language = form.chip('language') === 'other' ? form.text('language-other') : form.chip('language');
     const raceItems = form.checkedItems('race');
     const resource: Patient = {
@@ -171,15 +302,34 @@ export function AdmissionHealthScreeningWizard({
     };
     const saved = patient?.id ? await medplum.updateResource(resource) : await medplum.createResource(resource);
     setPatient(saved);
+    return saved;
+  }
+
+  /**
+   * Resolves the subject reference every other save handler writes against,
+   * creating the Patient first on a brand-new intake.
+   *
+   * Handlers must use this return value rather than reading `patient` state:
+   * `setPatient()` does not update the running closure, so the previous code
+   * — which awaited the patient save and then read state — sent
+   * `subject: undefined` on every resource in a first-time save, silently
+   * orphaning them from any patient.
+   */
+  async function ensurePatientRef(): Promise<Reference<Patient>> {
+    return createReference(patient?.id ? (patient as WithId<Patient>) : await savePatientRecord());
+  }
+
+  async function saveDemographics(): Promise<void> {
+    const subject = createReference(await savePatientRecord());
 
     if (form.text('hair-color')) {
-      await obs({ code: { text: 'Hair color' }, valueString: form.text('hair-color') });
+      await obs(subject, { code: { text: 'Hair color' }, valueString: form.text('hair-color') });
     }
     if (form.text('eye-color')) {
-      await obs({ code: { text: 'Eye color' }, valueString: form.text('eye-color') });
+      await obs(subject, { code: { text: 'Eye color' }, valueString: form.text('eye-color') });
     }
     if (form.checkedItems('mandated-reporter').length > 0) {
-      await obs({
+      await obs(subject, {
         code: { text: 'Mandated reporter statement read to youth' },
         valueString: 'Statement read',
         note: form.text('mandated-reporter-initials') ? [{ text: `RN initials: ${form.text('mandated-reporter-initials')}` }] : undefined,
@@ -188,15 +338,14 @@ export function AdmissionHealthScreeningWizard({
     }
   }
 
-  async function saveVitals() {
-    if (!patient?.id) await saveDemographics();
-    if (temp) await obs({ code: { text: 'Body temperature' }, valueQuantity: { value: Number(temp), unit: '°F' } });
-    if (pulse) await obs({ code: { text: 'Heart rate' }, valueQuantity: { value: Number(pulse), unit: '/min' } });
-    if (resp) await obs({ code: { text: 'Respiratory rate' }, valueQuantity: { value: Number(resp), unit: '/min' } });
-    if (bp) await obs({ code: { text: 'Blood pressure' }, valueString: bp });
-    if (weight) await obs({ code: { text: 'Body weight' }, valueQuantity: { value: Number(weight), unit: 'lb' } });
-    if (height) await obs({ code: { text: 'Body height' }, valueQuantity: { value: Number(height), unit: 'in' } });
-    if (bmi !== null) await obs({ code: { text: 'Body mass index (BMI)' }, valueQuantity: { value: Number(bmi.toFixed(1)), unit: 'kg/m2' } });
+  async function saveVitals(subject: Reference<Patient>) {
+    if (temp) await obs(subject, { code: { text: 'Body temperature' }, valueQuantity: { value: Number(temp), unit: '°F' } });
+    if (pulse) await obs(subject, { code: { text: 'Heart rate' }, valueQuantity: { value: Number(pulse), unit: '/min' } });
+    if (resp) await obs(subject, { code: { text: 'Respiratory rate' }, valueQuantity: { value: Number(resp), unit: '/min' } });
+    if (bp) await obs(subject, { code: { text: 'Blood pressure' }, valueString: bp });
+    if (weight) await obs(subject, { code: { text: 'Body weight' }, valueQuantity: { value: Number(weight), unit: 'lb' } });
+    if (height) await obs(subject, { code: { text: 'Body height' }, valueQuantity: { value: Number(height), unit: 'in' } });
+    if (bmi !== null) await obs(subject, { code: { text: 'Body mass index (BMI)' }, valueQuantity: { value: Number(bmi.toFixed(1)), unit: 'kg/m2' } });
 
     const visionFields: [string, string][] = [
       ['vision-nocorr-left', 'Visual acuity, left eye, without correction'],
@@ -207,17 +356,17 @@ export function AdmissionHealthScreeningWizard({
       ['vision-corr-both', 'Visual acuity, both eyes, with correction'],
     ];
     for (const [key, label] of visionFields) {
-      if (form.text(key)) await obs({ code: { text: label }, valueString: form.text(key) });
+      if (form.text(key)) await obs(subject, { code: { text: label }, valueString: form.text(key) });
     }
     if (form.chip('vision-glasses-past') === 'yes') {
-      await obs({ code: { text: 'History of prescribed glasses/contacts' }, valueString: form.text('vision-glasses-detail') || 'Yes' });
+      await obs(subject, { code: { text: 'History of prescribed glasses/contacts' }, valueString: form.text('vision-glasses-detail') || 'Yes' });
     }
 
     if (hasComplaint === 'yes' && complaintDetail) {
-      await obs({ code: { text: 'Chief complaint' }, valueString: complaintDetail });
+      await obs(subject, { code: { text: 'Chief complaint' }, valueString: complaintDetail });
     }
     if (hasPain === 'yes') {
-      await obs({
+      await obs(subject, {
         code: { text: 'Pain severity - 0-10 verbal numeric rating' },
         // Pain was reported, so the Observation is still worth recording even
         // if no score was captured — but it must not claim a score of 0.
@@ -234,111 +383,190 @@ export function AdmissionHealthScreeningWizard({
       });
     }
 
+    const medicationKeys = new Set<string>();
     for (const row of form.rows('medications-table')) {
       const [name, dosage, frequency, reason, prescriber, lastTaken] = row;
       if (!name) continue;
-      await medplum.createResource({
-        resourceType: 'MedicationStatement',
-        status: 'active',
-        subject: subjectRef,
-        medicationCodeableConcept: { text: name },
-        dosage: [{ text: [dosage, frequency].filter(Boolean).join(', ') || undefined }],
-        reasonCode: reason ? [{ text: reason }] : undefined,
-        informationSource: prescriber ? { display: prescriber } : undefined,
-        note: lastTaken ? [{ text: `Last taken: ${lastTaken}` }] : undefined,
-      } as any);
+      const key = `medication::${name}`;
+      medicationKeys.add(key);
+      await medplum.upsertResource(
+        {
+          resourceType: 'MedicationStatement',
+          status: 'active',
+          subject,
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+          medicationCodeableConcept: { text: name },
+          dosage: [{ text: [dosage, frequency].filter(Boolean).join(', ') || undefined }],
+          reasonCode: reason ? [{ text: reason }] : undefined,
+          informationSource: prescriber ? { display: prescriber } : undefined,
+          note: lastTaken ? [{ text: `Last taken: ${lastTaken}` }] : undefined,
+        } as any,
+        upsertQuery(key, subject)
+      );
     }
+    // A medication removed from the table is no longer being taken.
+    await retractStale(
+      'MedicationStatement',
+      subject,
+      (k) => k.startsWith('medication::'),
+      medicationKeys
+    );
   }
 
   // ---- Save handlers: Sections 3–4 ----
 
   /** Current Health Status (allergies card): allergies -> AllergyIntolerance, chronic conditions -> Condition */
-  async function saveAllergiesChronic() {
+  async function saveAllergiesChronic(subject: Reference<Patient>) {
+    const allergyKeys = new Set<string>();
     for (const item of form.checkedItems('allergy')) {
       if (item === 'No known allergies') continue;
-      await medplum.createResource({
-        resourceType: 'AllergyIntolerance',
-        patient: subjectRef,
-        code: { text: form.checkTextMap('allergy')[item] || item },
-        reaction: form.text('allergy-reaction') ? [{ description: form.text('allergy-reaction') }] : undefined,
-      } as any);
+      const key = `allergy::${item}`;
+      allergyKeys.add(key);
+      await medplum.upsertResource(
+        {
+          resourceType: 'AllergyIntolerance',
+          patient: subject,
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+          code: { text: form.checkTextMap('allergy')[item] || item },
+          reaction: form.text('allergy-reaction') ? [{ description: form.text('allergy-reaction') }] : undefined,
+        } as any,
+        // AllergyIntolerance has no `subject` search param — it's `patient`.
+        upsertQuery(key, subject, 'patient')
+      );
     }
-    // remove chronic
+    const chronicKeys = new Set<string>();
+    // Only populated when 'chronic' is yes — so switching the answer back to
+    // "no chronic conditions" leaves an empty live set and retracts them all.
     if (form.chip('chronic') === 'yes') {
       for (const item of form.checkedItems('chronic-list')) {
-        await medplum.createResource({
-          resourceType: 'Condition',
-          subject: subjectRef,
-          clinicalStatus: { text: 'active' },
-          code: { text: form.checkTextMap('chronic-list')[item] || item },
-        } as any);
+        const key = `chronic::${item}`;
+        chronicKeys.add(key);
+        await medplum.upsertResource(
+          {
+            resourceType: 'Condition',
+            subject,
+            identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+            clinicalStatus: { text: 'active' },
+            code: { text: form.checkTextMap('chronic-list')[item] || item },
+          } as any,
+          upsertQuery(key, subject)
+        );
       }
     }
+
+    await retractStale('AllergyIntolerance', subject, (k) => k.startsWith('allergy::'), allergyKeys, 'patient');
+    await retractStale('Condition', subject, (k) => k.startsWith('chronic::'), chronicKeys);
   }
 
   /** Current Health Status (appearance card): appearance/mental-status findings -> Observation */
-  async function saveMentalStatus() {
+  async function saveMentalStatus(subject: Reference<Patient>) {
+    const APPEARANCE_CODE = 'Appearance/mental status finding';
+    const liveKeys = new Set<string>();
     for (const item of form.checkedItems('appearance')) {
-      await obs({ code: { text: 'Appearance/mental status finding' }, valueString: item });
+      liveKeys.add(`${APPEARANCE_CODE}::${item}`);
+      await obs(subject, { code: { text: APPEARANCE_CODE }, valueString: item }, item);
     }
+    await retractStale('Observation', subject, (k) => k.startsWith(`${APPEARANCE_CODE}::`), liveKeys);
   }
 
   /** Section 3 (Review of Systems): every checked ROS/injury item -> Observation, tagged with its system */
-  async function saveReviewOfSystems() {
+  async function saveReviewOfSystems(subject: Reference<Patient>) {
     const systems: [string, string][] = [
       ['injuries', 'Injuries/trauma'],
       ['firearm-safety', 'Injury prevention'],
       ['dental', 'Oral/dental'],
       ['infectious', 'Infectious disease history'],
     ];
+    // Declared once and reused for both the write and the live-key set, so the
+    // reconciliation can never drift from the codes actually written.
+    const DENTAL_EXAM = 'Last dental exam';
+    const VISION_EXAM = 'Last vision exam';
+    const ROS_COMMENTS = 'Review of systems: additional comments';
+    const singleFieldKeys = [DENTAL_EXAM, VISION_EXAM, ROS_COMMENTS];
+
+    const liveKeys = new Set<string>();
     for (const [grid, label] of systems) {
       for (const item of form.checkedItems(grid)) {
         if (item.startsWith('No problems') || item.startsWith('No significant')) continue;
-        await obs({ code: { text: `Review of systems: ${label}` }, valueString: form.checkTextMap(grid)[item] || item });
+        const code = `Review of systems: ${label}`;
+        liveKeys.add(`${code}::${item}`);
+        await obs(subject, { code: { text: code }, valueString: form.checkTextMap(grid)[item] || item }, item);
       }
     }
     if (form.text('last-dental-exam')) {
-      await obs({ code: { text: 'Last dental exam' }, valueString: form.text('last-dental-exam') });
+      liveKeys.add(DENTAL_EXAM);
+      await obs(subject, { code: { text: DENTAL_EXAM }, valueString: form.text('last-dental-exam') });
     }
     if (form.text('vision-exam-date') || form.text('vision-provider')) {
-      await obs({
-        code: { text: 'Last vision exam' },
+      liveKeys.add(VISION_EXAM);
+      await obs(subject, {
+        code: { text: VISION_EXAM },
         valueString: `Date: ${form.text('vision-exam-date') || '—'}, provider: ${form.text('vision-provider') || '—'}`,
       });
     }
     if (form.text('ros-comments')) {
-      await obs({ code: { text: 'Review of systems: additional comments' }, valueString: form.text('ros-comments') });
+      liveKeys.add(ROS_COMMENTS);
+      await obs(subject, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
     }
+
+    // Scope covers both the checklist rows (which carry a `::item` suffix) and
+    // this section's three single-value fields, so clearing a text box retracts
+    // its Observation too rather than leaving a stale value in the chart.
+    await retractStale(
+      'Observation',
+      subject,
+      (k) => (k.startsWith('Review of systems: ') && k.includes('::')) || singleFieldKeys.includes(k),
+      liveKeys
+    );
   }
 
   /** Section 4 (Diagnosis & Disposition): nursing diagnoses -> Condition, plan items -> CarePlan note, sign-off -> Observation w/ note */
-  async function saveDiagnosisDisposition() {
-    for (const key of ['dx1', 'dx2', 'dx3', 'dx4']) {
-      const val = form.text(key);
+  async function saveDiagnosisDisposition(subject: Reference<Patient>) {
+    const diagnosisKeys = new Set<string>();
+    for (const field of ['dx1', 'dx2', 'dx3', 'dx4']) {
+      const val = form.text(field);
       if (val) {
-        await medplum.createResource({
-          resourceType: 'Condition',
-          subject: subjectRef,
-          category: [{ text: 'Nursing diagnosis' }],
-          code: { text: val },
-        } as any);
+        // Keyed by slot, not by text: editing a typo in diagnosis 2 should
+        // correct that diagnosis, not leave the misspelling behind and add a
+        // second Condition alongside it.
+        const key = `nursing-diagnosis::${field}`;
+        diagnosisKeys.add(key);
+        await medplum.upsertResource(
+          {
+            resourceType: 'Condition',
+            subject,
+            identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+            category: [{ text: 'Nursing diagnosis' }],
+            code: { text: val },
+          } as any,
+          upsertQuery(key, subject)
+        );
       }
     }
     const planItems = form.checkedItems('nursing-plan');
     if (planItems.length > 0) {
-      await medplum.createResource({
-        resourceType: 'CarePlan',
-        status: 'active',
-        intent: 'plan',
-        subject: subjectRef,
-        description: planItems.join('; '),
-      } as any);
+      const key = 'nursing-plan';
+      await medplum.upsertResource(
+        {
+          resourceType: 'CarePlan',
+          status: 'active',
+          intent: 'plan',
+          subject,
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+          description: planItems.join('; '),
+        } as any,
+        upsertQuery(key, subject)
+      );
     }
-    await obs({
+    await obs(subject, {
       code: { text: 'Admission health screening sign-off' },
       valueString: `Nurse: ${form.text('nurse-signature') || '—'}; Physician: ${form.text('physician-signature') || '—'}`,
       note: form.text('health-alerts') ? [{ text: form.text('health-alerts') }] : undefined,
     });
+
+    // Scoped to the nursing-diagnosis prefix so this cannot touch the chronic
+    // conditions reconciled by saveAllergiesChronic, which are also Conditions.
+    await retractStale('Condition', subject, (k) => k.startsWith('nursing-diagnosis::'), diagnosisKeys);
   }
 
   return (
@@ -542,9 +770,10 @@ export function AdmissionHealthScreeningWizard({
                   disabled={savingSection === 'health-status'}
                   onClick={() =>
                     runSave('health-status', 'Health status saved', async () => {
-                      await saveVitals();
-                      await saveAllergiesChronic();
-                      await saveMentalStatus();
+                      const subject = await ensurePatientRef();
+                      await saveVitals(subject);
+                      await saveAllergiesChronic(subject);
+                      await saveMentalStatus(subject);
                     })
                   }
                 >
@@ -594,7 +823,9 @@ export function AdmissionHealthScreeningWizard({
                   type="button"
                   className="djs-btn"
                   disabled={savingSection === 'ros'}
-                  onClick={() => runSave('ros', 'Review of systems saved', saveReviewOfSystems)}
+                  onClick={() =>
+                    runSave('ros', 'Review of systems saved', async () => saveReviewOfSystems(await ensurePatientRef()))
+                  }
                 >
                   {savingSection === 'ros' ? 'Saving…' : 'Save review of systems'}
                 </button>
@@ -630,7 +861,11 @@ export function AdmissionHealthScreeningWizard({
                   type="button"
                   className="djs-btn"
                   disabled={savingSection === 'disposition'}
-                  onClick={() => runSave('disposition', 'Diagnosis & disposition saved', saveDiagnosisDisposition)}
+                  onClick={() =>
+                    runSave('disposition', 'Diagnosis & disposition saved', async () =>
+                      saveDiagnosisDisposition(await ensurePatientRef())
+                    )
+                  }
                 >
                   {savingSection === 'disposition' ? 'Saving…' : 'Save diagnosis & disposition'}
                 </button>
