@@ -21,7 +21,8 @@ import { useFormState } from './formState';
 // each resource under this system's identifier (derived from the field that
 // produced it, so a re-save updates in place rather than duplicating), and the
 // summary/read-back loads it back by the same key.
-import { isScreeningRetracted, SCREENING_ID_SYSTEM } from './screeningData';
+import { isScreeningRetracted, loadScreeningResources, SCREENING_ID_SYSTEM } from './screeningData';
+import { hydrateScreeningForm } from './hydrateScreening';
 
 /**
  * Status code systems for Condition and AllergyIntolerance.
@@ -114,10 +115,64 @@ export function AdmissionHealthScreeningWizard({
   const [painScale, setPainScale] = useState<number>();
   const [painDetail, setPainDetail] = useState('');
 
+  // On mount for an existing patient, load the Patient and any prior screening
+  // and repopulate the form, so a partially-completed screening resumes where
+  // it left off instead of showing blank fields. Runs once per patient
+  // (deps: patientId/medplum); re-applying the same values under StrictMode's
+  // double-invoke is idempotent. `form` setters are intentionally not deps —
+  // `useFormState` returns a fresh object each render, which would loop.
   useEffect(() => {
-    if (patientId) {
-      medplum.readResource('Patient', patientId).then(setPatient).catch(console.error);
+    if (!patientId) {
+      return;
     }
+    let active = true;
+    (async () => {
+      const loaded = await medplum.readResource('Patient', patientId).catch(() => undefined);
+      if (!active) {
+        return;
+      }
+      if (loaded) {
+        setPatient(loaded);
+      }
+      const data = await loadScreeningResources(medplum, patientId).catch(() => undefined);
+      if (!active || !data) {
+        return;
+      }
+      const { scalars, texts, chips, checks } = hydrateScreeningForm(data, loaded);
+
+      if (scalars.lastName !== undefined) setLastName(scalars.lastName);
+      if (scalars.firstName !== undefined) setFirstName(scalars.firstName);
+      if (scalars.middleInitial !== undefined) setMiddleInitial(scalars.middleInitial);
+      if (scalars.dob !== undefined) setDob(scalars.dob);
+      if (scalars.sex !== undefined) setSex(scalars.sex);
+      if (scalars.temp !== undefined) setTemp(scalars.temp);
+      if (scalars.pulse !== undefined) setPulse(scalars.pulse);
+      if (scalars.resp !== undefined) setResp(scalars.resp);
+      if (scalars.bp !== undefined) setBp(scalars.bp);
+      if (scalars.weight !== undefined) setWeight(scalars.weight);
+      if (scalars.height !== undefined) setHeight(scalars.height);
+      if (scalars.hasComplaint !== undefined) setHasComplaint(scalars.hasComplaint);
+      if (scalars.complaintDetail !== undefined) setComplaintDetail(scalars.complaintDetail);
+      if (scalars.hasPain !== undefined) setHasPain(scalars.hasPain);
+      if (scalars.painScale !== undefined) setPainScale(scalars.painScale);
+      if (scalars.painDetail !== undefined) setPainDetail(scalars.painDetail);
+
+      for (const [key, value] of Object.entries(texts)) {
+        form.setText(key, value);
+      }
+      for (const [track, value] of Object.entries(chips)) {
+        form.setChip(track, value);
+      }
+      for (const [grid, items] of Object.entries(checks)) {
+        for (const item of items) {
+          form.toggleCheck(grid, item, true);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, medplum]);
 
   const trackedAnswers = [sex, hispanic, hasComplaint, hasPain];

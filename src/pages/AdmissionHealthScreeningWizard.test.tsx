@@ -53,6 +53,24 @@ async function renderWizard(medplum: MockClient): Promise<void> {
   });
 }
 
+/** Mounts the wizard at the patient route, so its mount-time read-back runs. */
+async function renderWizardForPatient(medplum: MockClient, patientId: string): Promise<void> {
+  await act(async () => {
+    render(
+      <MantineProvider>
+        <Notifications />
+        <MedplumProvider medplum={medplum}>
+          <MemoryRouter initialEntries={[`/admission-screening/${patientId}`]}>
+            <Routes>
+              <Route path="/admission-screening/:patientId" element={<AdmissionHealthScreeningWizard />} />
+            </Routes>
+          </MemoryRouter>
+        </MedplumProvider>
+      </MantineProvider>
+    );
+  });
+}
+
 interface WriteCapture {
   /** Every resource the wizard tried to persist, in order. */
   written: Resource[];
@@ -339,6 +357,50 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(pain).toBeDefined();
       expect(pain?.valueInteger).toBeUndefined();
       expect(pain?.dataAbsentReason).toBeDefined();
+    });
+  });
+
+  describe('form read-back on mount', () => {
+    // Task 10: opening an existing patient's screening must repopulate the
+    // form, not show blank fields. This mounts the wizard at the patient route
+    // with resources already on file and asserts they surface in the inputs —
+    // the integration counterpart to hydrateScreening.test.ts's unit coverage.
+    test('populates fields from resources already saved for the patient', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family: 'Rivera', given: ['Sam'] }],
+        birthDate: '2009-03-04',
+        gender: 'male',
+      });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Body temperature' }],
+        code: { text: 'Body temperature' },
+        valueQuantity: { value: 99.1, unit: '°F' },
+      } as Resource);
+      await medplum.createResource({
+        resourceType: 'AllergyIntolerance',
+        patient: subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'allergy::Latex allergy' }],
+        clinicalStatus: { coding: [{ code: 'active' }] },
+        code: { text: 'Latex allergy' },
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      // Section 1 shows on mount; the last name reads back from the Patient.
+      await waitFor(() => expect(fieldInput('Last name').value).toBe('Rivera'));
+
+      // Section 2: the saved vital and allergy come back too.
+      await goToStep(user, 'Current Health Status');
+      await waitFor(() => expect(fieldInput('Temp (°F)').value).toBe('99.1'));
+      expect(checkbox('Latex allergy').checked).toBe(true);
     });
   });
 });
