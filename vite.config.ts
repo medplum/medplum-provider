@@ -5,7 +5,7 @@ import dns from 'dns';
 import { copyFileSync, existsSync } from 'fs';
 import path from 'path';
 import type { UserConfig } from 'vite';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 dns.setDefaultResultOrder('verbatim');
 
@@ -46,5 +46,31 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test.setup.ts',
+    // Two projects, deliberately kept separate:
+    //  - "unit": everything today — MockClient only, no network, safe in CI.
+    //    This is what `npm test` runs.
+    //  - "live": *.live.test.* files that talk to a REAL Medplum server
+    //    (see AdmissionHealthScreeningWizard.live.test.tsx). Requires the
+    //    local Docker stack running plus MEDPLUM_LIVE_CLIENT_ID/SECRET env
+    //    vars. Never run by plain `vitest run` / `npm test` — only via
+    //    `npm run test:live` (see package.json), which targets this project
+    //    explicitly.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          exclude: [...configDefaults.exclude, '**/*.live.test.*'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'live',
+          include: ['**/*.live.test.*'],
+          testTimeout: 30_000,
+        },
+      },
+    ],
   },
 });
