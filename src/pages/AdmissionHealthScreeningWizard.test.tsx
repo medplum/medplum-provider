@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import type { WithId } from '@medplum/core';
 import { validateResource } from '@medplum/core';
-import type { Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Patient, Resource } from '@medplum/fhirtypes';
 import { DrAliceSmith, MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -95,27 +95,46 @@ interface WriteCapture {
  */
 function captureWrites(medplum: MockClient): WriteCapture {
   const capture: WriteCapture = { written: [], validationErrors: [] };
+
+  const record = (resource: Resource): void => {
+    capture.written.push(resource);
+    try {
+      for (const issue of validateResource(resource) ?? []) {
+        if (issue.severity === 'error' || issue.severity === 'fatal') {
+          capture.validationErrors.push(`${resource.resourceType}: ${issue.details?.text ?? issue.diagnostics ?? 'error'}`);
+        }
+      }
+    } catch (err) {
+      // validateResource throws an OperationOutcomeError on constraint failure.
+      capture.validationErrors.push(`${resource.resourceType}: ${(err as Error).message}`);
+    }
+  };
+
   const methods = ['createResource', 'updateResource', 'upsertResource'] as const;
   for (const method of methods) {
     const original = medplum[method].bind(medplum) as (...args: unknown[]) => Promise<unknown>;
     // `as never` bypasses the three methods' differing overloads — upsertResource
     // takes an extra query arg — which a single generic implementation can't match.
     vi.spyOn(medplum, method).mockImplementation((async (...args: unknown[]) => {
-      const resource = args[0] as Resource;
-      capture.written.push(resource);
-      try {
-        for (const issue of validateResource(resource) ?? []) {
-          if (issue.severity === 'error' || issue.severity === 'fatal') {
-            capture.validationErrors.push(`${resource.resourceType}: ${issue.details?.text ?? issue.diagnostics ?? 'error'}`);
-          }
-        }
-      } catch (err) {
-        // validateResource throws an OperationOutcomeError on constraint failure.
-        capture.validationErrors.push(`${resource.resourceType}: ${(err as Error).message}`);
-      }
+      record(args[0] as Resource);
       return original(...args);
     }) as never);
   }
+
+  // Section saves go through executeBatch (one transaction Bundle per section),
+  // so validate and record every entry's resource here too — otherwise the
+  // bundled clinical resources would escape the constraint check entirely, and
+  // MockClient does not validate bundle entries itself (verified).
+  const originalBatch = medplum.executeBatch.bind(medplum);
+  vi.spyOn(medplum, 'executeBatch').mockImplementation((async (bundle: Bundle) => {
+    for (const entry of bundle.entry ?? []) {
+      if (entry.resource) {
+        record(entry.resource as Resource);
+      }
+    }
+    return originalBatch(bundle);
+  }) as never);
+
   return capture;
 }
 
