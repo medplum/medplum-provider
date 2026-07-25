@@ -265,7 +265,20 @@ subtree so the scoped rule applies.
 read-back — extract a shared "load screening resources for patient"
 helper so the two can't diverge.
 
-### 16 — Swap `PatientSummary` for the DJS component
+### 16 — Show the DJS component on the patient page — **DONE** (`f2d54cf`)
+
+Resolved the replace-vs-supplement decision as **supplement**:
+`DjsPatientSummary` renders above Medplum's `PatientSummary` in the sidebar,
+so the default sections (vitals, meds, allergies, problems, pharmacies,
+Order Labs trigger) all stay — additive, no regression. `PatientPage.test.tsx`
+still fails only on the pre-existing `vi.spyOn`-on-`PatientSummary` ESM
+limitation; its 9 passing cases render the full page including the new
+component's `loadScreeningResources` call without crashing.
+
+If a *full* replacement is ever wanted, the original brief below has the
+list of default sections that would be lost.
+
+Original brief, for reference:
 
 Replace the patient component currently in the UI. It's Medplum's
 `PatientSummary` from `@medplum/react`, in `PatientPage`'s left sidebar at
