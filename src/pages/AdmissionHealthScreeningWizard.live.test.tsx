@@ -90,6 +90,34 @@ async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName:
   await waitFor(() => expect(button()).not.toBeDisabled(), { timeout: 15_000 });
 }
 
+/** The sidebar step buttons share a name with the section header / save button, so match by class. */
+async function goToStep(user: ReturnType<typeof userEvent.setup>, title: string): Promise<void> {
+  const step = Array.from(document.querySelectorAll<HTMLButtonElement>('button.djs-step')).find((b) =>
+    b.textContent?.includes(title)
+  );
+  if (!step) {
+    throw new Error(`Could not find sidebar step "${title}"`);
+  }
+  await user.click(step);
+}
+
+/** Finds a `.djs-check-chip` checkbox by the visible label text of its `<span>`. */
+function checkbox(labelText: string): HTMLInputElement {
+  const label = Array.from(document.querySelectorAll('label.djs-check-chip')).find((l) =>
+    l.querySelector('span')?.textContent?.startsWith(labelText)
+  );
+  const input = label?.querySelector('input[type="checkbox"]');
+  if (!input) {
+    throw new Error(`Could not find checkbox for "${labelText}"`);
+  }
+  return input as HTMLInputElement;
+}
+
+/** A fresh, collision-proof family name per test — searched with `:exact` so no test's Patient matches another's. */
+function uniqueFamily(): string {
+  return `DjsLive-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (live server)', () => {
   // Unique per run so repeated `npm run test:live` invocations don't collide
   // with Patients left over by earlier runs — the local server's Postgres
@@ -97,7 +125,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
   const runTag = `DjsLiveTest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   let medplum: MedplumClient;
-  let createdPatientId: string | undefined;
+  const createdPatientIds: string[] = [];
 
   beforeAll(async () => {
     medplum = new MedplumClient({ baseUrl: BASE_URL });
@@ -105,13 +133,13 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
   }, 30_000);
 
   afterAll(async () => {
-    // Best-effort cleanup, not a correctness assertion: the test's own
+    // Best-effort cleanup, not a correctness assertion: the tests' own
     // expectations already ran and passed or failed above. A leftover test
     // Patient on a local dev server is clutter, not a bug — so a failed
     // delete here shouldn't turn a passing test red.
-    if (createdPatientId) {
+    for (const id of createdPatientIds) {
       try {
-        await medplum.deleteResource('Patient', createdPatientId);
+        await medplum.deleteResource('Patient', id);
       } catch {
         // ignore — best-effort only, see comment above.
       }
@@ -132,7 +160,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
 
       const [createdPatient] = (await medplum.searchResources('Patient', { family: runTag })) as WithId<Patient>[];
       expect(createdPatient).toBeDefined();
-      createdPatientId = createdPatient.id;
+      createdPatientIds.push(createdPatient.id);
 
       const firstObservations = await medplum.searchResources('Observation', {
         subject: `Patient/${createdPatient.id}`,
@@ -157,5 +185,118 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       expect(secondObservations[0].id).toBe(firstObservationId);
     },
     30_000
+  );
+
+  test(
+    'the real server accepts the constraint-bearing resources every section writes',
+    async () => {
+      // The reason a live server was needed at all: MockClient does not validate
+      // on write, so ait-1 / con-3 / ele-1 were only ever caught by the unit
+      // suite's validateResource proxy. This drives the sections that produce
+      // those resource types and asserts each one actually persisted — which it
+      // can only do if the server accepted it. Demographics alone (the
+      // idempotency test above) exercises none of them.
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      // Section 1 — establish the Patient (found later by its unique family).
+      await user.type(fieldInput('Last name'), family);
+      await saveSection(user, /save demographics/i);
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+      const subjectRef = `Patient/${patient.id}`;
+
+      // Section 2 — an allergy (ait-1), a chronic condition (con-3), and a
+      // medication with a name but no dosage (ele-1).
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Latex allergy'));
+      await user.click(screen.getByRole('button', { name: /has one or more/i }));
+      await user.click(checkbox('Asthma'));
+      const addMedication = screen.getByRole('button', { name: /add medication/i });
+      await user.click(addMedication);
+      const medName = addMedication.previousElementSibling?.querySelector('tbody tr td input') as HTMLInputElement;
+      await user.type(medName, 'Aspirin');
+      await saveSection(user, /save health status/i);
+
+      // Section 4 — a nursing-diagnosis Condition (con-3).
+      await goToStep(user, 'Diagnosis & Disposition');
+      await user.type(fieldInput('1.'), 'Risk for withdrawal');
+      await saveSection(user, /save diagnosis & disposition/i);
+
+      // Existence on the server == the server accepted it. A rejected ait-1 /
+      // con-3 / ele-1 write would surface as an error toast and no resource.
+      const allergies = await medplum.searchResources('AllergyIntolerance', {
+        patient: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|allergy::Latex allergy`,
+      });
+      expect(allergies).toHaveLength(1); // ait-1: clinicalStatus present
+
+      const chronic = await medplum.searchResources('Condition', {
+        subject: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|chronic::Asthma`,
+      });
+      expect(chronic).toHaveLength(1); // con-3: chronic condition
+
+      const nursingDx = await medplum.searchResources('Condition', {
+        subject: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|nursing-diagnosis::dx1`,
+      });
+      expect(nursingDx).toHaveLength(1); // con-3: nursing diagnosis
+
+      const meds = await medplum.searchResources('MedicationStatement', {
+        subject: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|medication::Aspirin`,
+      });
+      expect(meds).toHaveLength(1); // ele-1: dosage omitted, not an empty element
+      expect(meds[0].dosage).toBeUndefined();
+    },
+    60_000
+  );
+
+  test(
+    'unchecking an allergy retracts it on the real server (entered-in-error, not deleted)',
+    async () => {
+      // The retraction round-trip is the behavior MockClient handled
+      // inconsistently (it could not find a bundle-created resource in a later
+      // search), which is why task 9 was deferred. Proving it against the real
+      // server is the highest-value live check after constraint acceptance.
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), family);
+      await saveSection(user, /save demographics/i);
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+      const subjectRef = `Patient/${patient.id}`;
+      const allergyQuery = {
+        patient: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|allergy::Latex allergy`,
+      };
+
+      // Check the allergy and save — it should exist and be active.
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Latex allergy'));
+      await saveSection(user, /save health status/i);
+
+      const afterCheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
+      expect(afterCheck).toHaveLength(1);
+      const codesAfterCheck = afterCheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
+      expect(codesAfterCheck).not.toContain('entered-in-error');
+
+      // Uncheck it and save again — it must be withdrawn, not deleted.
+      await user.click(checkbox('Latex allergy'));
+      await saveSection(user, /save health status/i);
+
+      const afterUncheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
+      expect(afterUncheck).toHaveLength(1);
+      expect(afterUncheck[0].id).toBe(afterCheck[0].id);
+      const codesAfterUncheck = afterUncheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
+      expect(codesAfterUncheck).toContain('entered-in-error');
+    },
+    60_000
   );
 });
