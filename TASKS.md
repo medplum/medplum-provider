@@ -1,7 +1,7 @@
 # DJS Admission Screening — task plan
 
 Working plan for getting the wizard to a functioning, demonstrable
-prototype. Current as of commit `0e8f04b`.
+prototype. Current as of commit `e2fbf7c`.
 
 **Target defined with the user:** a demo that *really saves* — backed by a
 real Medplum project, writing real FHIR, no duplicate-on-resave. Not just
@@ -26,35 +26,98 @@ deprioritised until the data path is trustworthy.
 | 7 | Save feedback — pending state + success/error toasts | `95faefb` |
 | 8 | Idempotent saves via conditional upsert; fix orphaned `subject` | `0e8f04b` |
 | 11 | Retract findings the form no longer asserts | `0e8f04b` |
+| — | FHIR constraint fixes: `ait-1`, `con-3`, `ele-1` | `2b3fdba` |
+| 14 (part) | `formState`, field-integrity, and save-twice tests | `e2fbf7c` |
+| — | Unblock `npm install`; pin dependency versions | uncommitted |
 
-Two of these were bugs found along the way rather than planned work:
+Several of these were bugs found along the way rather than planned work:
 
 - **Orphaned resources (task 8).** `subjectRef` was computed at render
   time, so a first-time save wrote `subject: undefined` on every resource.
   The `/admission-screening` route hit this every time.
 - **Missing devDeps (task 2).** Pre-existing; `npm run build` failed on a
   fresh clone for anyone, unrelated to the wizard.
+- **FHIR constraint violations (`2b3fdba`).** Saving an allergy failed with
+  `ait-1` — `AllergyIntolerance` was written with no `clinicalStatus`.
+  Pre-existing; it only became *visible* once task 7 added error toasts,
+  so allergies had most likely never saved successfully. Auditing for the
+  same class found three more: nursing-diagnosis `Condition` had the
+  identical `con-3` bug latent (would have failed on section 4), chronic
+  conditions used a text-only `clinicalStatus` that doesn't satisfy R4's
+  required binding, and a `MedicationStatement` with no dosage or
+  frequency emitted `dosage: [{}]`, violating `ele-1`.
+- **`npm install` was hard-failing (uncommitted).**
+  `@medplum/eslint-config` was set to `^2.0.26`, resolving to 2.2.10 — a
+  different major line that peer-requires `eslint@^8`, while every sibling
+  `@medplum/*` is pinned at 5.1.27 and `eslint` resolves to 9.x. `ERESOLVE`
+  aborted the whole install, so nobody could set the project up from
+  scratch. Restored to `5.1.27`.
+- **`react-router` reverted from `^8.3.0` to `7.18.1`.** The major bump
+  looked clean on every obvious check — it installed, `npm run build`
+  passed, all 28 DJS tests passed, and the app rendered and routed
+  correctly. It is still **not safe**: it regresses **9 parent-package test
+  files** and roughly doubles failures within the affected set (44 → 107).
+  Regressed only under 8.x: `TaskPanel`, `EncounterModal`,
+  `CommunicationTab`, `DocumentsPage`, `EditTab`, `IntakeFormPage`,
+  `ResourceCreatePage`, `ResourceEditPage`, `TasksPage`.
 
-### Verified by a real test pass
+  Measured by installing each version and diffing the failing-file lists,
+  which is the only reliable way to see it — build and DJS tests pass under
+  both. If a v8 migration is wanted later, those 9 files are the work item.
+  Note `@medplum/react@5.1.27` declares no `react-router` dependency or
+  peer at all, so npm warns about nothing either way.
 
-Build/compile, routing, save toasts, pain slider.
+  Pinned exactly rather than with a caret: `package-lock.json` is
+  gitignored, so ranges are the *only* version control in this repo and
+  drift silently on every install.
+
+**A recurring pattern worth noting:** three separate pre-existing defects
+(orphaned `subject`, the discarded Epi-Pen answer, and `ait-1`) surfaced
+only after error visibility improved or a check was written. Expect more
+in sections that haven't been exercised with realistic data yet.
+
+### Verified
+
+- **Against a live server:** routing, save toasts, pain slider, and the
+  `ait-1` allergy failure (which is what prompted the constraint fixes).
+- **Locally:** `npm install` now completes, `npm run build` passes, and the
+  28 DJS tests pass (`formState` 24, field-integrity 3, save-twice 1).
+- **`react-router` stays at 7.18.1.** The `^8.3.0` bump was tested and
+  **reverted** — see the dependency note below.
 
 ### Not yet verified against a live server
 
-Everything in `0e8f04b` — idempotent upserts, retraction, the
-orphaned-subject fix. This is a substantial rewrite of the write path that
-has never run against a real Medplum server.
+Most of `0e8f04b` and all of `2b3fdba` — idempotent upserts, retraction,
+the orphaned-subject fix, and the four constraint fixes. This is a
+substantial rewrite of the write path.
 
 Worth checking specifically:
 
 1. Save the same section twice → second save updates, doesn't duplicate.
+   (Covered by a unit test against `MockClient`, not a real server.)
 2. Check an allergy, save, uncheck it, save → `AllergyIntolerance` comes
    back `entered-in-error`; it should neither vanish nor stay active.
+   `clinicalStatus` staying `active` alongside it is correct per `ait-1`.
 3. Use `/admission-screening` with no patient → resources have a real
    `subject`.
-4. If saves start erroring, suspect the `identifier=system|` search in
+4. Save each section once with realistic data, to flush out any remaining
+   constraint violations of the `ait-1`/`con-3`/`ele-1` kind. Sections not
+   yet exercised are where these hide.
+5. If saves start erroring, suspect the `identifier=system|` search in
    `retractStale` — there's a client-side fallback, but that's the first
    place to look.
+
+### Full test suite state
+
+`npx vitest run` → **18 files / 106 tests failing, 98 files / 1152 tests
+passing.** None of the failures are in DJS code.
+
+The failures are the parent package's pre-existing Vitest/ESM limitation:
+`vi.spyOn()` on a module export (`useNavigate`, `PatientSummary`) raises
+`Cannot spy on export` / `Cannot redefine property`, plus some 5s timeouts
+under load. Out of scope here, but note the count is **higher than the
+15 files / 76 tests recorded when the tests were written** — see the
+verification note under task 14 before assuming the delta is benign.
 
 ---
 
@@ -115,6 +178,52 @@ transaction Bundle per section.
 Partly a refactor of whatever tasks 10 and 12 land on, so it's cheaper
 after them than before.
 
+### 15 — DJS patient summary component showing saved screening data
+
+Build a DJS-styled patient summary that surfaces what the wizard saves —
+vitals (temp, pulse, resp, BP, weight, height, BMI), allergies, chronic
+conditions, current medications, pain score, screening sign-off — showing
+each section only if data exists, with a clear empty state when a patient
+has no screening on file.
+
+Read by searching the `SCREENING_ID_SYSTEM` identifier for the patient,
+the same key scheme the wizard writes (see the write path in `CLAUDE.md`).
+
+**Two things it must handle that the wizard's own path doesn't yet:**
+
+1. **Skip retracted resources.** Observation/MedicationStatement with
+   `status: 'entered-in-error'`, and Condition/AllergyIntolerance with
+   `verificationStatus` entered-in-error, are findings the nurse withdrew.
+   Displaying them would defeat the point of task 11.
+2. **Tolerate legacy bad data.** Existing test data contains duplicates
+   and subject-less resources from the pre-`0e8f04b` bugs.
+
+Style with the existing `.djs-*` classes and keep it inside a `.djs-root`
+subtree so the scoped rule applies.
+
+**Overlaps task 10.** The read logic is largely the same as form
+read-back — extract a shared "load screening resources for patient"
+helper so the two can't diverge.
+
+### 16 — Swap `PatientSummary` for the DJS component
+
+Replace the patient component currently in the UI. It's Medplum's
+`PatientSummary` from `@medplum/react`, in `PatientPage`'s left sidebar at
+`src/pages/patient/PatientPage.tsx:78`, taking `patient`,
+`onClickResource`, and a `sections` prop built at line 48 from
+`getDefaultSections()` with a pharmacies section swapped in.
+
+**Decide explicitly whether this replaces or supplements it.** Full
+replacement drops the default sections — vitals, medications, allergies,
+problems, pharmacies, and the Order Labs modal trigger wired through
+`setIsLabsModalOpen`. Confirm which are still wanted before deleting them,
+or this is a feature regression rather than a swap.
+
+Note `PatientPage.test.tsx` is one of the ~15 pre-existing failing files
+(the `vi.spyOn` ESM limitation, on `PatientSummary` among others), so
+check whether the swap makes it pass, still fails for that same
+pre-existing reason, or fails for a new one.
+
 ### 14 — Test coverage for the DJS wizard, matching the parent package's style
 
 There is currently no coverage for any DJS code, despite an established
@@ -153,6 +262,17 @@ that pattern onto the wizard rather than inventing a new one.
    `PatientPage.test.tsx`, `TasksPage.test.tsx`. Pre-existing Vitest/ESM
    limitation in the parent package, not introduced by DJS work — left
    alone by design; out of scope here.
+
+   **Baseline discrepancy — RESOLVED.** A later run measured 18 files /
+   ~106 tests failing against the 15 / 76 above. The cause was the
+   `react-router` `^8.3.0` bump, not noise: diffing failing-file lists
+   between 8.3.0 and 7.18.1 showed 9 files that fail only under 8.x.
+   `react-router` has been reverted to `7.18.1`, which restores this
+   baseline. See the dependency note in the Done section.
+
+   The remaining failures really are pre-existing and unrelated to DJS
+   code. If this figure moves again, diff the failing-file lists rather
+   than assuming — the totals alone hid a 9-file regression.
 
 2. **DONE — `src/pages/AdmissionHealthScreeningWizard.fieldIntegrity.test.ts`.**
    Ports the field-integrity script and the `code.text` collision grep
