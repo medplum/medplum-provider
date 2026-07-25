@@ -193,20 +193,29 @@ too, not just "Yes" — absence of an Epi-Pen is itself clinically relevant.
 `epipen` was removed from `KNOWN_OPEN_BUGS` in the field-integrity test in
 the same change; that test passing is now the proof the field is read.
 
-### 10 — Populate form fields from existing resources on mount
+### 10 — Form read-back on mount — **DONE** (`9d6d54f`, `de93193`)
 
-Duplicates are prevented, but the form isn't **resumable**: opening a
-partially-completed screening shows blank fields. A nurse interrupted
-mid-screening can't pick up where they left off, which a real admission
-workflow needs.
+The form is now resumable. `hydrateScreeningForm(data, patient)` in
+`hydrateScreening.ts` is a **pure** reverse of the save handlers (live
+resources → form values); the wizard's mount effect loads via
+`loadScreeningResources`, hydrates, and applies scalar setters + FormState.
 
-Use `loadScreeningResources` from `screeningData.ts` (built for task 15) to
-fetch and filter the resources, then map them back into `FormState` keys by
-their screening identifier. The load/filter/dedupe half is done; what's left
-is the resource → FormState mapping. Note this **doubles the surface for the
-"field wired in the JSX but missing from the handler" bug class** — run the
-field-integrity script in `CLAUDE.md` before and after, or better, turn it
-into a real test first.
+Keeping the mapping pure and unit-tested is the deliberate defense against
+the "field wired but never handled" bug class doubling — that class is
+**invisible to the field-integrity grep**, which only sees FormState
+symmetry, not a resource → field mapping. 8 unit tests + 1 integration test
+(mount at the patient route, assert inputs populate). 49 DJS tests total.
+
+Covered: vitals, pain, complaint, allergies+reaction, chronic list,
+appearance/ROS checklists, nursing diagnoses, nursing plan, core Patient
+demographics. **Deferred to task 17** (lossy or extra): medications,
+sign-off, mandated-reporter, hair/eye/race/interpreter/birthplace/
+ethnicity/vision-acuity, and `Other::` free text.
+
+Found while mapping — **task 18**: `chronic-providers`, `chronic-pcp`,
+`chronic-comments` and `injuries-detail` are captured in the JSX but written
+by no save handler (epipen-class data loss). Read-back can't restore what
+isn't persisted, so the write must be fixed first.
 
 ### 9 — Batch each section's writes into a transaction Bundle
 
