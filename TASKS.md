@@ -217,14 +217,44 @@ Found while mapping — **task 18**: `chronic-providers`, `chronic-pcp`,
 by no save handler (epipen-class data loss). Read-back can't restore what
 isn't persisted, so the write must be fixed first.
 
-### 9 — Batch each section's writes into a transaction Bundle
+### 9 — Batch each section's writes into a transaction Bundle — **ATTEMPTED, reverted; do on the backend**
 
 Each handler issues N sequential awaited writes with no transaction, so a
-failure mid-save leaves the section half-persisted. Replace with one FHIR
-transaction Bundle per section.
+failure mid-save leaves the section half-persisted. The fix is one FHIR
+`transaction` Bundle per section.
 
-Partly a refactor of whatever tasks 10 and 12 land on, so it's cheaper
-after them than before.
+**This was implemented in full and then reverted.** Why: it can't be
+verified against `MockClient`, and it broke a green test that a real
+server wouldn't. Probing `MockClient.executeBatch` found:
+
+1. Transaction bundles + conditional PUT **work** for create and
+   same-session conditional-match update.
+2. But MockClient does **not enforce transaction atomicity** — an
+   `ait-1`-violating entry did not roll the bundle back. So task 9's whole
+   point (a mid-save failure leaves nothing written) is **unverifiable**
+   against the mock.
+3. Worse, a resource **created via a bundle** conditional PUT is not
+   reliably found by a later `searchResources` in the running component
+   flow — `searchResources('AllergyIntolerance', {})` returned 0 in the
+   second save though the resource existed. That broke the retraction
+   round-trip test, on a MockClient limitation, not a real bug.
+
+The refactor (one `ScreeningBundle` per section's onClick; `obs`/upserts
+append entries; `commitBundle` → `executeBatch({type:'transaction'})`;
+retractions kept as direct idempotent `updateResource` on prior-save data)
+got 5/6 wizard tests green, but the 6th can't pass on the mock and
+atomicity can't be shown offline either way. Reverted to the
+sequential-upsert version (**49 DJS tests green**).
+
+Kept: the checkpoint-1 harness change (`captureWrites` intercepts
+`executeBatch`, `a5ab376`) — harmless with no producer, and needed when
+this lands.
+
+**Recommendation: implement on the real backend**, where the transaction
+is actually atomic and testable. Low urgency regardless — conditional
+upsert already makes a partial save self-heal on the next save, so this is
+hardening, not a blocker. This is the one task that genuinely needs the
+backend to complete *and* verify.
 
 ### 15 — DJS patient summary component — **DONE** (`ac20232`, `e269d99`, `b7f71f1`)
 
