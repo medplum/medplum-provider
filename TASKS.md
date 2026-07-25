@@ -1,7 +1,7 @@
 # DJS Admission Screening — task plan
 
 Working plan for getting the wizard to a functioning, demonstrable
-prototype. Current as of commit `2148f2b`.
+prototype. Current as of commit `abd1961`.
 
 **Target defined with the user:** a demo that *really saves* — backed by a
 real Medplum project, writing real FHIR, no duplicate-on-resave. Not just
@@ -34,7 +34,9 @@ deprioritised until the data path is trustworthy.
 | 15 | DJS patient summary + shared `screeningData` loader | `ac20232`, `e269d99`, `b7f71f1` |
 | 16 | Show DJS summary on the patient page | `f2d54cf` |
 | 10 | Form read-back on mount | `9d6d54f`, `de93193` |
-| — | Live-server tests: idempotency, constraint acceptance, retraction | `cfe0d4f`, `2148f2b` |
+| — | Live-server tests: idempotency, constraint acceptance, retraction (all pass) | `cfe0d4f`, `2148f2b` |
+| — | Fix live-only bugs the live tests caught: bare `system\|` search, `ait-2`/`con-5` retraction | `7494d01`, `af9aa55` |
+| 18 | Save `chronic-*` and `injuries-detail` free-text (data loss) | `abd1961` |
 
 Several of these were bugs found along the way rather than planned work:
 
@@ -84,7 +86,7 @@ in sections that haven't been exercised with realistic data yet.
 
 ### Verified
 
-- **Locally, by automated unit test (49 DJS tests, `npm test`):**
+- **Locally, by automated unit test (50 DJS tests, `npm test`):**
   - **Constraint validity** across all four sections, via `validateResource`
     — the `ait-1`/`con-3`/`ele-1` class, mutation-verified.
   - **Idempotent upsert** — saving a section twice updates in place.
@@ -96,8 +98,8 @@ in sections that haven't been exercised with realistic data yet.
   - **`screeningData` loader** — retraction/duplicate filtering; **DJS patient
     summary** rendering, incl. a retracted finding staying off screen.
   - **Field integrity** and `FormState`/`parseItems` logic.
-- **Against a live server, by automated test (`npm run test:live`):** three
-  scenarios via a client-credentials login to a local Medplum stack — see
+- **Against a live server — all three PASS (`npm run test:live`):** run via a
+  client-credentials login to a local Medplum stack — see
   `AdmissionHealthScreeningWizard.live.test.tsx`. These are the checks
   `MockClient` genuinely cannot make:
   1. **Idempotency** — demographics saved twice → one Patient, one
@@ -110,6 +112,13 @@ in sections that haven't been exercised with realistic data yet.
      `entered-in-error` on the server, not deleted.
   - The live project is separate from `npm test` (see `vite.config.ts`) and
     skips cleanly without `MEDPLUM_LIVE_CLIENT_ID`/`SECRET`.
+  - **Two real server-only bugs the live tests caught** (both invisible to
+    `MockClient`, now fixed): a bare `identifier=system|` search the live
+    server returns empty for (broke retraction *and* the summary/read-back
+    loader), and `asRetracted` leaving `clinicalStatus` set alongside
+    `verificationStatus=entered-in-error`, which violates `ait-2`/`con-5` and
+    the server rejects. The retraction unit test now runs through
+    `captureWrites` so the `ait-2` class is caught offline too.
 - **Also verified live by hand earlier:** routing, save toasts, pain slider,
   and the original `ait-1` failure that prompted the constraint fixes.
 - **Locally, by hand:** `npm install` completes, `npm run build` passes.
@@ -135,7 +144,7 @@ real data (both are covered offline against `MockClient` today).
 ### Full test suite state
 
 Baseline on `react-router` 7.18.1: **9 files / 44 tests failing, the rest
-passing.** None of the failures are in DJS code — all 49 DJS unit tests
+passing.** None of the failures are in DJS code — all 50 DJS unit tests
 pass (plus 3 live tests, run separately via `npm run test:live`).
 
 The failures are the parent package's pre-existing Vitest/ESM limitation:
@@ -280,17 +289,16 @@ Wiring is already in place — the mount effect applies whatever the pure
 function returns — so each is a mapping in `hydrateScreeningForm` plus a
 unit test.
 
-### 18 — Save `chronic-providers` / `-pcp` / `-comments` and `injuries-detail`
+### 18 — Save `chronic-providers` / `-pcp` / `-comments` and `injuries-detail` — **DONE** (`abd1961`)
 
-Four text fields captured in the JSX (`value=form.text` / `onChange=
-form.setText`) but read by **no save handler**, so the input is silently
-discarded — the same epipen-class bug as task 13. Confirmed by grep: each
-key appears only at its JSX line. Fix by persisting them via
-`saveObservationSet` in the right section handler (chronic-* in
-`saveAllergiesChronic`, `injuries-detail` in `saveReviewOfSystems`), then
-add the reverse mapping to task 17. The field-integrity test **cannot**
-catch this class — a JSX `value=` read counts as a read — so it needs a
-targeted check or a manual JSX-vs-handler diff.
+Four text fields captured in the JSX but read by **no save handler** —
+silently discarded, the same epipen-class bug as task 13. Now persisted:
+`chronic-*` via `saveObservationSet` in `saveAllergiesChronic` (sharing that
+call's retraction scope), `injuries-detail` in `saveReviewOfSystems`.
+Guarded by a focused test that fills all four through the UI and asserts each
+Observation persisted — the field-integrity grep **cannot** catch this class
+(a JSX `value=` read counts as a read). Read-back for these is folded into
+task 17; until then they persist but show blank on reopen.
 
 ### 15 — DJS patient summary component — **DONE** (`ac20232`, `e269d99`, `b7f71f1`)
 
