@@ -16,16 +16,12 @@ import { PatientBand } from '../components/PatientBand';
 import { SidebarStepper, WizardStep } from '../components/SidebarStepper';
 import { showErrorNotification, showSuccessNotification } from '../utils/notifications';
 import { useFormState } from './formState';
-
-/**
- * Every resource this wizard writes carries an identifier under this system,
- * whose value is derived from the field that produced it. That makes each
- * resource deterministically addressable, so re-saving a section updates the
- * existing resource instead of appending a duplicate. Matching is done
- * server-side by `upsertResource`'s conditional update, which stays correct
- * even if two people save the same screening concurrently.
- */
-const SCREENING_ID_SYSTEM = 'http://maryland.gov/djs/admission-screening';
+// SCREENING_ID_SYSTEM and the retraction check live in screeningData.ts, the
+// single source of truth shared with the read-back path — the wizard writes
+// each resource under this system's identifier (derived from the field that
+// produced it, so a re-save updates in place rather than duplicating), and the
+// summary/read-back loads it back by the same key.
+import { isScreeningRetracted, SCREENING_ID_SYSTEM } from './screeningData';
 
 /**
  * Status code systems for Condition and AllergyIntolerance.
@@ -224,14 +220,6 @@ export function AdmissionHealthScreeningWizard({
     }
   }
 
-  /** True once a resource has already been withdrawn, so we don't rewrite it. */
-  function isRetracted(res: any): boolean {
-    return (
-      res.status === 'entered-in-error' ||
-      res.verificationStatus?.coding?.some((c: { code?: string }) => c.code === 'entered-in-error') === true
-    );
-  }
-
   /**
    * Withdraws resources this section wrote previously that the form no longer
    * asserts.
@@ -273,7 +261,7 @@ export function AdmissionHealthScreeningWizard({
 
     for (const res of existing) {
       const key = res.identifier?.find((i) => i.system === SCREENING_ID_SYSTEM)?.value;
-      if (!key || !inScope(key) || liveKeys.has(key) || isRetracted(res)) {
+      if (!key || !inScope(key) || liveKeys.has(key) || isScreeningRetracted(res)) {
         continue;
       }
       await medplum.updateResource(asRetracted(res));
