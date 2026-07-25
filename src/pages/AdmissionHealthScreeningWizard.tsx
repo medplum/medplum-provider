@@ -27,6 +27,29 @@ import { useFormState } from './formState';
  */
 const SCREENING_ID_SYSTEM = 'http://maryland.gov/djs/admission-screening';
 
+/**
+ * Status code systems for Condition and AllergyIntolerance.
+ *
+ * These are required bindings, not optional niceties. FHIR constraints
+ * `ait-1` and `con-3` reject a resource that has neither a `clinicalStatus`
+ * nor a `verificationStatus` of `entered-in-error`, so a coded
+ * `clinicalStatus` has to be written up front — a text-only CodeableConcept
+ * satisfies `exists()` but not the required binding.
+ */
+const ALLERGY_CLINICAL_SYSTEM = 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical';
+const ALLERGY_VERIFICATION_SYSTEM = 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification';
+const CONDITION_CLINICAL_SYSTEM = 'http://terminology.hl7.org/CodeSystem/condition-clinical';
+const CONDITION_VERIFICATION_SYSTEM = 'http://terminology.hl7.org/CodeSystem/condition-ver-status';
+
+const ACTIVE_ALLERGY_STATUS = {
+  coding: [{ system: ALLERGY_CLINICAL_SYSTEM, code: 'active' }],
+  text: 'Active',
+};
+const ACTIVE_CONDITION_STATUS = {
+  coding: [{ system: CONDITION_CLINICAL_SYSTEM, code: 'active' }],
+  text: 'Active',
+};
+
 const STEPS: WizardStep[] = [
   { n: 1, title: 'Patient Information' },
   { n: 2, title: 'Current Health Status' },
@@ -189,23 +212,12 @@ export function AdmissionHealthScreeningWizard({
       case 'Condition':
         return {
           ...res,
-          verificationStatus: {
-            coding: [
-              { system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'entered-in-error' },
-            ],
-          },
+          verificationStatus: { coding: [{ system: CONDITION_VERIFICATION_SYSTEM, code: 'entered-in-error' }] },
         };
       case 'AllergyIntolerance':
         return {
           ...res,
-          verificationStatus: {
-            coding: [
-              {
-                system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification',
-                code: 'entered-in-error',
-              },
-            ],
-          },
+          verificationStatus: { coding: [{ system: ALLERGY_VERIFICATION_SYSTEM, code: 'entered-in-error' }] },
         };
       default:
         return res;
@@ -389,6 +401,11 @@ export function AdmissionHealthScreeningWizard({
       if (!name) continue;
       const key = `medication::${name}`;
       medicationKeys.add(key);
+      // Omit `dosage` entirely when there's nothing to put in it: an array
+      // holding an empty Dosage violates ele-1 ("all elements must have a
+      // value or children"), so a medication logged without a dose would be
+      // rejected outright.
+      const dosageText = [dosage, frequency].filter(Boolean).join(', ');
       await medplum.upsertResource(
         {
           resourceType: 'MedicationStatement',
@@ -396,7 +413,7 @@ export function AdmissionHealthScreeningWizard({
           subject,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           medicationCodeableConcept: { text: name },
-          dosage: [{ text: [dosage, frequency].filter(Boolean).join(', ') || undefined }],
+          dosage: dosageText ? [{ text: dosageText }] : undefined,
           reasonCode: reason ? [{ text: reason }] : undefined,
           informationSource: prescriber ? { display: prescriber } : undefined,
           note: lastTaken ? [{ text: `Last taken: ${lastTaken}` }] : undefined,
@@ -427,6 +444,8 @@ export function AdmissionHealthScreeningWizard({
           resourceType: 'AllergyIntolerance',
           patient: subject,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+          // Required by constraint ait-1 — see ALLERGY_CLINICAL_SYSTEM above.
+          clinicalStatus: ACTIVE_ALLERGY_STATUS,
           code: { text: form.checkTextMap('allergy')[item] || item },
           reaction: form.text('allergy-reaction') ? [{ description: form.text('allergy-reaction') }] : undefined,
         } as any,
@@ -446,7 +465,7 @@ export function AdmissionHealthScreeningWizard({
             resourceType: 'Condition',
             subject,
             identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
-            clinicalStatus: { text: 'active' },
+            clinicalStatus: ACTIVE_CONDITION_STATUS,
             code: { text: form.checkTextMap('chronic-list')[item] || item },
           } as any,
           upsertQuery(key, subject)
@@ -536,6 +555,9 @@ export function AdmissionHealthScreeningWizard({
             resourceType: 'Condition',
             subject,
             identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
+            // Required by constraint con-3, same as the chronic conditions
+            // above. Its absence here was a latent copy of the ait-1 failure.
+            clinicalStatus: ACTIVE_CONDITION_STATUS,
             category: [{ text: 'Nursing diagnosis' }],
             code: { text: val },
           } as any,
