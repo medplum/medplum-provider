@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Loader, Modal, Paper, ScrollArea } from '@mantine/core';
 import { getReferenceString, isOk } from '@medplum/core';
-import type { OperationOutcome } from '@medplum/fhirtypes';
+import type { WithId } from '@medplum/core';
+import type { OperationOutcome, Patient } from '@medplum/fhirtypes';
 import {
   createPharmaciesSection,
   Document,
@@ -18,6 +19,7 @@ import { Outlet, useNavigate } from 'react-router';
 import { usePharmacyDialog } from '../../components/pharmacy/usePharmacyDialog';
 import { useDoseSpotAccess } from '../../hooks/useDoseSpotAccess';
 import { usePatient } from '../../hooks/usePatient';
+import { DjsPatientSummary } from '../../components/DjsPatientSummary';
 import { OrderLabsPage } from '../labs/OrderLabsPage';
 import classes from './PatientPage.module.css';
 import { getPatientPageTabs, patientPathPrefix } from './PatientPage.utils';
@@ -75,6 +77,14 @@ export function PatientPage(): JSX.Element {
       <div key={getReferenceString(patient)} className={classes.container}>
         <div className={classes.sidebar}>
           <ScrollArea className={classes.scrollArea}>
+            {/*
+              DJS admission-screening summary, rendered above Medplum's default
+              PatientSummary rather than replacing it — the default sections
+              (vitals, meds, allergies, problems, pharmacies, Order Labs) stay,
+              so this is additive, not a feature regression. patient.id is
+              guaranteed by the guard above, hence the WithId cast.
+            */}
+            <DjsPatientSummary patient={patient as WithId<Patient>} />
             <PatientSummary
               patient={patient}
               onClickResource={(resource) =>
