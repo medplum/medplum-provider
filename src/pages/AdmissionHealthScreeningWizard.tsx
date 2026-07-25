@@ -254,22 +254,32 @@ export function AdmissionHealthScreeningWizard({
    * Marks a resource as withdrawn without destroying it. Observation and
    * MedicationStatement carry `status`; Condition and AllergyIntolerance
    * express retraction through `verificationStatus` instead.
+   *
+   * For those two, `clinicalStatus` must be REMOVED, not just left in place:
+   * `ait-2` / `con-5` forbid `clinicalStatus` when `verificationStatus` is
+   * `entered-in-error`. The live server rejects the update otherwise (the
+   * retraction silently failed and the finding stayed active); MockClient does
+   * not validate, so only the live test caught it.
    */
   function asRetracted(res: any): any {
     switch (res.resourceType) {
       case 'Observation':
       case 'MedicationStatement':
         return { ...res, status: 'entered-in-error' };
-      case 'Condition':
+      case 'Condition': {
+        const { clinicalStatus: _drop, ...rest } = res;
         return {
-          ...res,
+          ...rest,
           verificationStatus: { coding: [{ system: CONDITION_VERIFICATION_SYSTEM, code: 'entered-in-error' }] },
         };
-      case 'AllergyIntolerance':
+      }
+      case 'AllergyIntolerance': {
+        const { clinicalStatus: _drop, ...rest } = res;
         return {
-          ...res,
+          ...rest,
           verificationStatus: { coding: [{ system: ALLERGY_VERIFICATION_SYSTEM, code: 'entered-in-error' }] },
         };
+      }
       default:
         return res;
     }

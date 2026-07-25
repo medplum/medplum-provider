@@ -320,6 +320,12 @@ describe('AdmissionHealthScreeningWizard', () => {
     test('unchecking an allergy marks it entered-in-error, not deleted', async () => {
       const medplum = new MockClient();
       medplum.mock.setProfile(DrAliceSmith);
+      // Validate every write, including the retraction update. MockClient does
+      // not enforce constraints, so without this the retracted AllergyIntolerance
+      // (clinicalStatus + verificationStatus=entered-in-error) would sail through
+      // here while the live server rejects it on ait-2 — exactly the gap that let
+      // that bug reach the live test.
+      const capture = captureWrites(medplum);
       const user = userEvent.setup();
       await renderWizard(medplum);
 
@@ -349,6 +355,11 @@ describe('AdmissionHealthScreeningWizard', () => {
       const retractedCodes2 =
         afterUncheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
       expect(retractedCodes2).toContain('entered-in-error');
+
+      // The retraction update must itself be valid FHIR (ait-2: no clinicalStatus
+      // alongside verificationStatus=entered-in-error). This is what a real
+      // server enforces; the assertion above only checks the code is present.
+      expect(capture.validationErrors).toEqual([]);
     });
   });
 
