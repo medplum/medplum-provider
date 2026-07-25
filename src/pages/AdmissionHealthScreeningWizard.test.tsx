@@ -324,51 +324,62 @@ describe('AdmissionHealthScreeningWizard', () => {
 
   describe('retraction round-trip', () => {
     // Task 11: unchecking a saved item must withdraw its resource, not leave it
-    // asserted in the chart and not hard-delete it. Verified end to end against
-    // MockClient, whose conditional-upsert and identifier search semantics
-    // match the server (confirmed separately).
+    // asserted in the chart and not hard-delete it.
+    //
+    // The prior allergy is seeded via createResource, NOT a first wizard save.
+    // Since section saves now go through a transaction Bundle (task 9),
+    // MockClient will not find a bundle-created resource in the later
+    // retraction search within the same test — a mock quirk, not a real bug
+    // (the live retraction test exercises the full check→save→uncheck→save flow
+    // against a real server). Seeding directly + read-back reproduces the
+    // "a prior save recorded this, now the nurse clears it" state faithfully.
     test('unchecking an allergy marks it entered-in-error, not deleted', async () => {
       const medplum = new MockClient();
       medplum.mock.setProfile(DrAliceSmith);
-      // Validate every write, including the retraction update. MockClient does
-      // not enforce constraints, so without this the retracted AllergyIntolerance
-      // (clinicalStatus + verificationStatus=entered-in-error) would sail through
-      // here while the live server rejects it on ait-2 — exactly the gap that let
-      // that bug reach the live test.
+      const patient = await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family: 'Retract' }],
+      });
+      await medplum.createResource({
+        resourceType: 'AllergyIntolerance',
+        patient: { reference: `Patient/${patient.id}` },
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'allergy::Latex allergy' }],
+        clinicalStatus: {
+          coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }],
+        },
+        code: { text: 'Latex allergy' },
+      } as Resource);
+
+      // captureWrites AFTER seeding, so it validates the wizard's writes (the
+      // retraction update) but not the test setup. MockClient does not enforce
+      // constraints, so this is what catches an ait-2-violating retraction
+      // offline (clinicalStatus must be absent when entered-in-error).
       const capture = captureWrites(medplum);
       const user = userEvent.setup();
-      await renderWizard(medplum);
+      await renderWizardForPatient(medplum, patient.id);
 
+      // Read-back checks the seeded allergy; confirm the round-trip starts from
+      // the "previously saved and checked" state.
       await goToStep(user, 'Current Health Status');
-      await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      await waitFor(() => expect(checkbox('Latex allergy').checked).toBe(true));
 
-      // Identify the allergy by its screening identifier alone — one patient in
-      // this test, so no patient filter is needed, and it avoids depending on a
-      // separate Patient lookup.
       const allergyQuery = { identifier: `${SCREENING_ID_SYSTEM}|allergy::Latex allergy` };
+      const before = await medplum.searchResources('AllergyIntolerance', allergyQuery);
+      expect(before).toHaveLength(1);
+      expect(before[0].verificationStatus?.coding?.map((c) => c.code) ?? []).not.toContain('entered-in-error');
 
-      const afterCheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
-      expect(afterCheck).toHaveLength(1);
-      const retractedCodes1 =
-        afterCheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
-      expect(retractedCodes1).not.toContain('entered-in-error');
-
-      // Uncheck the same allergy and save again.
+      // Uncheck it and save — retractStale finds the (createResource'd) allergy
+      // and withdraws it.
       await user.click(checkbox('Latex allergy'));
       await saveSection(user, /save health status/i);
 
       const afterUncheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
-      // Still exactly one resource — withdrawn, not deleted.
-      expect(afterUncheck).toHaveLength(1);
-      expect(afterUncheck[0].id).toBe(afterCheck[0].id);
-      const retractedCodes2 =
-        afterUncheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
-      expect(retractedCodes2).toContain('entered-in-error');
+      expect(afterUncheck).toHaveLength(1); // withdrawn, not deleted
+      expect(afterUncheck[0].id).toBe(before[0].id);
+      expect(afterUncheck[0].verificationStatus?.coding?.map((c) => c.code) ?? []).toContain('entered-in-error');
 
       // The retraction update must itself be valid FHIR (ait-2: no clinicalStatus
-      // alongside verificationStatus=entered-in-error). This is what a real
-      // server enforces; the assertion above only checks the code is present.
+      // alongside verificationStatus=entered-in-error).
       expect(capture.validationErrors).toEqual([]);
     });
   });

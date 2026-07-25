@@ -299,4 +299,61 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
     },
     60_000
   );
+
+  test(
+    'a transaction bundle is atomic — one invalid entry rolls the whole thing back',
+    async () => {
+      // Task 9's whole point: a section save is one transaction Bundle, so a
+      // failure part-way leaves the section wholly unwritten, not half-saved.
+      // MockClient does NOT enforce this (it partial-commits), so it can only be
+      // verified against a real server. We submit a bundle with one valid
+      // Observation and one ait-1-violating AllergyIntolerance and assert the
+      // server rejects the whole bundle and persists neither.
+      const family = uniqueFamily();
+      const patient = (await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family }],
+      })) as WithId<Patient>;
+      createdPatientIds.push(patient.id);
+      const subjectRef = `Patient/${patient.id}`;
+      const goodId = `atomicity-good::${family}`;
+
+      const bundle = {
+        resourceType: 'Bundle' as const,
+        type: 'transaction' as const,
+        entry: [
+          {
+            request: { method: 'PUT' as const, url: `Observation?identifier=${SCREENING_ID_SYSTEM}|${goodId}&subject=${subjectRef}` },
+            resource: {
+              resourceType: 'Observation',
+              status: 'final',
+              subject: { reference: subjectRef },
+              identifier: [{ system: SCREENING_ID_SYSTEM, value: goodId }],
+              code: { text: 'Atomicity probe (valid)' },
+              valueString: 'ok',
+            },
+          },
+          {
+            // ait-1 violation: AllergyIntolerance with no clinicalStatus.
+            request: { method: 'POST' as const, url: 'AllergyIntolerance' },
+            resource: {
+              resourceType: 'AllergyIntolerance',
+              patient: { reference: subjectRef },
+              code: { text: 'Atomicity probe (invalid)' },
+            },
+          },
+        ],
+      };
+
+      await expect(medplum.executeBatch(bundle as never)).rejects.toBeDefined();
+
+      // The valid entry must NOT have persisted — the whole transaction rolled back.
+      const good = await medplum.searchResources('Observation', {
+        subject: subjectRef,
+        identifier: `${SCREENING_ID_SYSTEM}|${goodId}`,
+      });
+      expect(good).toHaveLength(0);
+    },
+    60_000
+  );
 });
