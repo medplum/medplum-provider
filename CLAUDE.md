@@ -207,6 +207,21 @@ grep -oE "code: \{ text: '[^']+'" src/pages/AdmissionHealthScreeningWizard.tsx \
 
 Then `npm run build` (type-checks tests too) and `npx vitest run`.
 
+### Constraint validity in tests — the `captureWrites` harness
+
+`MockClient` does **not** run FHIR constraint validation on write — it
+will happily store an `ait-1`-violating resource — so a test that merely
+drives the wizard and checks it didn't throw will miss the whole
+`ait-1`/`con-3`/`ele-1` class. `AdmissionHealthScreeningWizard.test.tsx`
+has a `captureWrites(medplum)` helper that wraps the write methods and runs
+each resource through `validateResource` from `@medplum/core`, which
+*does* reproduce the server's constraints (identical error text). Any new
+section or resource type should be driven through a test using it and
+asserting `capture.validationErrors` is empty — that is the automated
+stand-in for the manual "save it and see what the server rejects" pass.
+The constraint test was mutation-verified: removing a `clinicalStatus`
+makes it fail with the real `ait-1` message.
+
 ## Formatting
 
 **CRLF line endings, not LF** — this is committed from Windows.

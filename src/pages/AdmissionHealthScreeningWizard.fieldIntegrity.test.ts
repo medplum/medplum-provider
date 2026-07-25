@@ -65,8 +65,10 @@ const KNOWN_SCRIPT_BLIND_SPOTS = ['injuries', 'firearm-safety', 'infectious'];
  * from this list (and close the matching TASKS.md item), not to add it
  * to KNOWN_SCRIPT_BLIND_SPOTS.
  */
-const KNOWN_OPEN_BUGS = [
-  'epipen', // TASKS.md #13 — captured via `track="epipen"`, never read back in saveAllergiesChronic.
+const KNOWN_OPEN_BUGS: string[] = [
+  // Empty, and worth keeping that way. `epipen` was here for TASKS.md #13 —
+  // captured via `track="epipen"` and read by no save handler — and was fixed
+  // in saveAllergiesChronic, so it came off this list in the same change.
 ];
 
 describe('AdmissionHealthScreeningWizard field integrity', () => {
@@ -111,4 +113,4 @@ describe('AdmissionHealthScreeningWizard field integrity', () => {
 
     expect(duplicates).toEqual([]);
   });
-});
+});

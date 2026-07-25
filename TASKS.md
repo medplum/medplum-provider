@@ -80,81 +80,118 @@ in sections that haven't been exercised with realistic data yet.
 
 - **Against a live server:** routing, save toasts, pain slider, and the
   `ait-1` allergy failure (which is what prompted the constraint fixes).
-- **Locally:** `npm install` now completes, `npm run build` passes, and the
-  28 DJS tests pass (`formState` 24, field-integrity 3, save-twice 1).
+- **Locally, by automated test (32 DJS tests):**
+  - **Constraint validity** across all four sections, via `validateResource`
+    — the `ait-1`/`con-3`/`ele-1` class, mutation-verified.
+  - **Idempotent upsert** — saving a section twice updates in place.
+  - **Retraction round-trip** — uncheck → `entered-in-error`, not deleted.
+  - **Subject integrity** — first-time save references a real patient
+    (the task-8 orphan bug).
+  - **Pain absent-vs-zero** — reported-but-unscored saves `dataAbsentReason`.
+  - **Field integrity** and `FormState`/`parseItems` logic.
+- **Locally, by hand:** `npm install` completes, `npm run build` passes.
 - **`react-router` stays at 7.18.1.** The `^8.3.0` bump was tested and
   **reverted** — see the dependency note below.
 
-### Not yet verified against a live server
+### Still needs a live server
 
-Most of `0e8f04b` and all of `2b3fdba` — idempotent upserts, retraction,
-the orphaned-subject fix, and the four constraint fixes. This is a
-substantial rewrite of the write path.
+The offline tests above cover the write path's *logic*. A real server is
+still owed for, as a one-time smoke check:
 
-Worth checking specifically:
-
-1. Save the same section twice → second save updates, doesn't duplicate.
-   (Covered by a unit test against `MockClient`, not a real server.)
-2. Check an allergy, save, uncheck it, save → `AllergyIntolerance` comes
-   back `entered-in-error`; it should neither vanish nor stay active.
-   `clinicalStatus` staying `active` alongside it is correct per `ait-1`.
-3. Use `/admission-screening` with no patient → resources have a real
-   `subject`.
-4. Save each section once with realistic data, to flush out any remaining
-   constraint violations of the `ait-1`/`con-3`/`ele-1` kind. Sections not
-   yet exercised are where these hide.
-5. If saves start erroring, suspect the `identifier=system|` search in
-   `retractStale` — there's a client-side fallback, but that's the first
-   place to look.
+1. **Auth + real persistence** — genuine login and round-trip.
+2. **Validation beyond structural/FHIRPath** — AccessPolicy, terminology
+   binding to a real ValueSet, reference existence. `validateResource`
+   covers the constraint class that has actually bitten here, not these.
 
 ### Full test suite state
 
-`npx vitest run` → **18 files / 106 tests failing, 98 files / 1152 tests
-passing.** None of the failures are in DJS code.
+Baseline on `react-router` 7.18.1: **9 files / 44 tests failing, the rest
+passing.** None of the failures are in DJS code — all 32 DJS tests pass.
 
 The failures are the parent package's pre-existing Vitest/ESM limitation:
-`vi.spyOn()` on a module export (`useNavigate`, `PatientSummary`) raises
-`Cannot spy on export` / `Cannot redefine property`, plus some 5s timeouts
-under load. Out of scope here, but note the count is **higher than the
-15 files / 76 tests recorded when the tests were written** — see the
-verification note under task 14 before assuming the delta is benign.
+`vi.spyOn()` on a module export (`useNavigate`, `PatientSummary`,
+`normalizeErrorString`) raises `Cannot spy on export` / `Cannot redefine
+property`, plus a couple of 5s timeouts under load. Not fixable by a
+dependency version (confirmed under `vitest` 4.1.9); fixing means
+rewriting those tests to `vi.mock()`, which is parent-package work. The
+earlier "18 files / 106" figure was the `react-router` 8 regression, now
+reverted; the earlier "15 / 76" was measured before this code state.
+
+---
+
+## What the offline tests now cover, and what still needs a server
+
+**Task 14 is done (32 DJS tests).** The manual "save each section and see
+what FHIR rejects" pass is now automated. Key finding from probing
+`MockClient`: it does **not** validate on write — it will store an
+`ait-1`-violating resource without complaint — but `validateResource` from
+`@medplum/core` reproduces the server's constraint checks *exactly* (same
+`ait-1` error text). So the `captureWrites` harness in
+`AdmissionHealthScreeningWizard.test.tsx` wraps every write, runs
+`validateResource`, and collects failures. The constraint test drives all
+four sections and asserts zero violations; it was mutation-verified —
+removing the allergy `clinicalStatus` makes it fail with the real `ait-1`
+message, so the guard demonstrably bites. Retraction round-trip and
+first-save subject integrity are covered the same way, plus the pain
+absent-vs-zero case. `MockClient`'s conditional-upsert and `identifier`
+token-search semantics were confirmed to match the server.
+
+**What still needs a live server** (one smoke check, not per-change):
+
+- **Auth and real persistence** — a genuine login and round-trip.
+- **Beyond structural/FHIRPath constraints** — `validateResource` covers
+  the class that has actually bitten here (`ait-1`/`con-3`/`ele-1`), but
+  not AccessPolicy rejections, terminology binding to a real ValueSet, or
+  reference-existence checks. Faithful for this prototype's known failure
+  modes; not a full server.
+
+### Tests still owed — but they belong to tasks 9 and 10, not 14
+
+- **Task 10 (read-back): no coverage, and the field-integrity grep can't
+  help.** That check greps `form.setText`/`form.text` symmetry in source;
+  read-back adds a resource → FormState mapping the regex can't see, so a
+  field that reads into the wrong key passes clean. Needs new tests that
+  *seed* `MockClient`, mount at `/admission-screening/:patientId`, and
+  assert inputs come back populated. `renderWizard` will need to take a
+  patient id (today it hard-codes the patient-less route).
+- **Task 9 (bundles): the save-twice test will need editing, and the
+  rollback property is untested.** Save-twice asserts on mechanism
+  (`createSpy` call count); moving writes into an `executeBatch` Bundle
+  hides them from that spy, though its `searchResources` assertions
+  survive. Nothing yet asserts a mid-save failure leaves *nothing*
+  written — task 9's whole point — so it could ship broken green. Add a
+  test that forces one write to reject and asserts rollback.
 
 ---
 
 ## Open
 
-### 12 — Retract single-value fields *(recommended next; safety)*
+### 12 — Retract single-value fields — **DONE** (uncommitted)
 
-Task 11 covered checklists, medications, nursing diagnoses, and Review of
-Systems' three text fields. **Still uncovered: 14 single-value
-Observations plus the 6 vision-acuity fields** — temperature, heart rate,
-respiratory rate, blood pressure, weight, height, BMI, chief complaint,
-pain severity, hair/eye colour, mandated-reporter, glasses history,
-visual acuity ×6, and the sign-off.
+All 20 are now reconciled: the 14 single-value Observations plus the 6
+vision-acuity fields. Done via a new `saveObservationSet(subject, fields)`
+helper — each section declares its fields as a list of
+`{ code, value }`, writes the ones with a value, and derives the
+retraction scope from *that same list*. `value: undefined` means cleared:
+declared, not written, retracted if a previous save recorded it.
 
-Clearing any of these leaves the previous value asserted in the chart. **A
-stale temperature of 101°F is the dangerous case** — same bug class as
-task 11, but on the most clinically visible fields.
+Declaring the fields as data rather than a run of `if (x) await obs(...)`
+statements is the point. An enumerated scope constant maintained alongside
+the writes would drift, and that drift would be *invisible* — a field
+missing from the scope simply never gets retracted, leaving a stale
+clinical value asserted with nothing to flag it.
 
-Do it carefully: hand-listing ~20 keys in a scope constant would drift
-from the writes, which is the exact failure mode this file keeps hitting.
-Restructure `saveVitals`/`saveDemographics` so each field is declared once
-as a `(code, value)` pair, then derive both the writes and the
-reconciliation scope from that single declaration.
+Correctly excluded: the sign-off Observation is written unconditionally,
+so it can never be stale. Checklist-driven and ROS fields keep their
+existing task-11 scopes.
 
-### 13 — Save the Epi-Pen fields *(small, live data loss)*
+### 13 — Save the Epi-Pen fields — **DONE** (uncommitted)
 
-The Allergies card renders a `track="epipen"` yes/no plus an
-`epipen-detail` text input, but **no save handler reads either one**. The
-nurse's answer to "Ever used / prescribed an Epi-Pen?" is silently
-discarded.
-
-Found by running the field-integrity script in `CLAUDE.md` while writing
-these docs — a live instance of the bug class that script exists to catch.
-Clinically relevant: Epi-Pen history matters for anaphylaxis response.
-
-Fix in `saveAllergiesChronic`, routed through `obs()` so it participates
-in upsert and retraction like everything else.
+Persisted in `saveAllergiesChronic` through `saveObservationSet`, so it
+gets upsert and retraction like everything else. A recorded "No" is saved
+too, not just "Yes" — absence of an Epi-Pen is itself clinically relevant.
+`epipen` was removed from `KNOWN_OPEN_BUGS` in the field-integrity test in
+the same change; that test passing is now the proof the field is read.
 
 ### 10 — Populate form fields from existing resources on mount
 
@@ -224,7 +261,21 @@ Note `PatientPage.test.tsx` is one of the ~15 pre-existing failing files
 check whether the swap makes it pass, still fails for that same
 pre-existing reason, or fails for a new one.
 
-### 14 — Test coverage for the DJS wizard, matching the parent package's style
+### 14 — Test coverage for the DJS wizard — **DONE** (uncommitted)
+
+32 DJS tests, following the parent package's Vitest pattern:
+`formState.test.ts` (24), `AdmissionHealthScreeningWizard.fieldIntegrity.test.ts`
+(3), and `AdmissionHealthScreeningWizard.test.tsx` (5: save-twice,
+constraint validity, subject integrity, retraction round-trip, pain
+absent-vs-zero). The `captureWrites` harness — validate every write via
+`validateResource`, collect failures — is reusable for future sections.
+The remaining owed tests (read-back, bundle rollback) belong to tasks 10
+and 9 and are described under "What the offline tests now cover" above.
+
+The original plan and parent-style reference notes follow, kept for
+whoever writes the task-9/10 cases.
+
+---
 
 There is currently no coverage for any DJS code, despite an established
 Vitest pattern throughout the rest of `medplum-provider` (colocated

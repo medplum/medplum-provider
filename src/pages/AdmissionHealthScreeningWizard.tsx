@@ -280,6 +280,37 @@ export function AdmissionHealthScreeningWizard({
     }
   }
 
+  /**
+   * Writes one Observation per declared field that has a value, and retracts
+   * any the form no longer asserts.
+   *
+   * Sections declare their fields as data rather than as a run of
+   * `if (x) await obs(...)` statements so that the reconciliation scope is
+   * derived from the very list that drives the writes. A scope constant
+   * maintained separately would drift from the writes, which is the failure
+   * mode this file has been bitten by repeatedly — and here that drift would
+   * be invisible: a field missing from the scope simply never gets retracted,
+   * leaving a stale clinical value asserted with nothing to flag it.
+   *
+   * `value: undefined` means "cleared" — declared, not written, and retracted
+   * if a previous save recorded it.
+   */
+  async function saveObservationSet(
+    subject: Reference<Patient>,
+    fields: { code: string; value?: Partial<Observation> }[]
+  ): Promise<void> {
+    const liveKeys = new Set<string>();
+    for (const field of fields) {
+      if (!field.value) {
+        continue;
+      }
+      liveKeys.add(field.code);
+      await obs(subject, { code: { text: field.code }, ...field.value });
+    }
+    const owned = new Set(fields.map((f) => f.code));
+    await retractStale('Observation', subject, (k) => owned.has(k), liveKeys);
+  }
+
   // ---- Save handlers: Sections 1–2 ----
 
   /** Writes the Patient record itself and returns it, with a guaranteed id. */
@@ -333,32 +364,26 @@ export function AdmissionHealthScreeningWizard({
 
   async function saveDemographics(): Promise<void> {
     const subject = createReference(await savePatientRecord());
+    const initials = form.text('mandated-reporter-initials');
 
-    if (form.text('hair-color')) {
-      await obs(subject, { code: { text: 'Hair color' }, valueString: form.text('hair-color') });
-    }
-    if (form.text('eye-color')) {
-      await obs(subject, { code: { text: 'Eye color' }, valueString: form.text('eye-color') });
-    }
-    if (form.checkedItems('mandated-reporter').length > 0) {
-      await obs(subject, {
-        code: { text: 'Mandated reporter statement read to youth' },
-        valueString: 'Statement read',
-        note: form.text('mandated-reporter-initials') ? [{ text: `RN initials: ${form.text('mandated-reporter-initials')}` }] : undefined,
-        effectiveDateTime: new Date().toISOString(),
-      });
-    }
+    await saveObservationSet(subject, [
+      { code: 'Hair color', value: form.text('hair-color') ? { valueString: form.text('hair-color') } : undefined },
+      { code: 'Eye color', value: form.text('eye-color') ? { valueString: form.text('eye-color') } : undefined },
+      {
+        code: 'Mandated reporter statement read to youth',
+        value:
+          form.checkedItems('mandated-reporter').length > 0
+            ? {
+                valueString: 'Statement read',
+                note: initials ? [{ text: `RN initials: ${initials}` }] : undefined,
+                effectiveDateTime: new Date().toISOString(),
+              }
+            : undefined,
+      },
+    ]);
   }
 
   async function saveVitals(subject: Reference<Patient>) {
-    if (temp) await obs(subject, { code: { text: 'Body temperature' }, valueQuantity: { value: Number(temp), unit: '°F' } });
-    if (pulse) await obs(subject, { code: { text: 'Heart rate' }, valueQuantity: { value: Number(pulse), unit: '/min' } });
-    if (resp) await obs(subject, { code: { text: 'Respiratory rate' }, valueQuantity: { value: Number(resp), unit: '/min' } });
-    if (bp) await obs(subject, { code: { text: 'Blood pressure' }, valueString: bp });
-    if (weight) await obs(subject, { code: { text: 'Body weight' }, valueQuantity: { value: Number(weight), unit: 'lb' } });
-    if (height) await obs(subject, { code: { text: 'Body height' }, valueQuantity: { value: Number(height), unit: 'in' } });
-    if (bmi !== null) await obs(subject, { code: { text: 'Body mass index (BMI)' }, valueQuantity: { value: Number(bmi.toFixed(1)), unit: 'kg/m2' } });
-
     const visionFields: [string, string][] = [
       ['vision-nocorr-left', 'Visual acuity, left eye, without correction'],
       ['vision-nocorr-right', 'Visual acuity, right eye, without correction'],
@@ -367,33 +392,57 @@ export function AdmissionHealthScreeningWizard({
       ['vision-corr-right', 'Visual acuity, right eye, with correction'],
       ['vision-corr-both', 'Visual acuity, both eyes, with correction'],
     ];
-    for (const [key, label] of visionFields) {
-      if (form.text(key)) await obs(subject, { code: { text: label }, valueString: form.text(key) });
-    }
-    if (form.chip('vision-glasses-past') === 'yes') {
-      await obs(subject, { code: { text: 'History of prescribed glasses/contacts' }, valueString: form.text('vision-glasses-detail') || 'Yes' });
-    }
 
-    if (hasComplaint === 'yes' && complaintDetail) {
-      await obs(subject, { code: { text: 'Chief complaint' }, valueString: complaintDetail });
-    }
-    if (hasPain === 'yes') {
-      await obs(subject, {
-        code: { text: 'Pain severity - 0-10 verbal numeric rating' },
-        // Pain was reported, so the Observation is still worth recording even
-        // if no score was captured — but it must not claim a score of 0.
-        // FHIR requires dataAbsentReason instead of value[x], never both.
-        ...(painScale === undefined
-          ? {
-              dataAbsentReason: {
-                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/data-absent-reason', code: 'unknown' }],
-                text: 'Pain reported but no score recorded',
-              },
-            }
-          : { valueInteger: painScale }),
-        note: painDetail ? [{ text: painDetail }] : undefined,
-      });
-    }
+    await saveObservationSet(subject, [
+      { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp), unit: '°F' } } : undefined },
+      { code: 'Heart rate', value: pulse ? { valueQuantity: { value: Number(pulse), unit: '/min' } } : undefined },
+      { code: 'Respiratory rate', value: resp ? { valueQuantity: { value: Number(resp), unit: '/min' } } : undefined },
+      { code: 'Blood pressure', value: bp ? { valueString: bp } : undefined },
+      { code: 'Body weight', value: weight ? { valueQuantity: { value: Number(weight), unit: 'lb' } } : undefined },
+      { code: 'Body height', value: height ? { valueQuantity: { value: Number(height), unit: 'in' } } : undefined },
+      {
+        code: 'Body mass index (BMI)',
+        value: bmi !== null ? { valueQuantity: { value: Number(bmi.toFixed(1)), unit: 'kg/m2' } } : undefined,
+      },
+      ...visionFields.map(([key, label]) => ({
+        code: label,
+        value: form.text(key) ? { valueString: form.text(key) } : undefined,
+      })),
+      {
+        code: 'History of prescribed glasses/contacts',
+        value:
+          form.chip('vision-glasses-past') === 'yes'
+            ? { valueString: form.text('vision-glasses-detail') || 'Yes' }
+            : undefined,
+      },
+      {
+        code: 'Chief complaint',
+        value: hasComplaint === 'yes' && complaintDetail ? { valueString: complaintDetail } : undefined,
+      },
+      {
+        code: 'Pain severity - 0-10 verbal numeric rating',
+        value:
+          hasPain === 'yes'
+            ? {
+                // Pain was reported, so the Observation is still worth recording
+                // even if no score was captured — but it must not claim a score
+                // of 0. FHIR requires dataAbsentReason instead of value[x],
+                // never both.
+                ...(painScale === undefined
+                  ? {
+                      dataAbsentReason: {
+                        coding: [
+                          { system: 'http://terminology.hl7.org/CodeSystem/data-absent-reason', code: 'unknown' },
+                        ],
+                        text: 'Pain reported but no score recorded',
+                      },
+                    }
+                  : { valueInteger: painScale }),
+                note: painDetail ? [{ text: painDetail }] : undefined,
+              }
+            : undefined,
+      },
+    ]);
 
     const medicationKeys = new Set<string>();
     for (const row of form.rows('medications-table')) {
@@ -472,6 +521,23 @@ export function AdmissionHealthScreeningWizard({
         );
       }
     }
+
+    // Task 13: the Epi-Pen yes/no and its detail box were rendered but read by
+    // no save handler at all, so the nurse's answer was silently discarded.
+    // Epi-Pen history matters for anaphylaxis response, so a recorded "No" is
+    // worth persisting too, not just a "Yes".
+    const epipen = form.chip('epipen');
+    await saveObservationSet(subject, [
+      {
+        code: 'Epi-Pen prescribed or previously used',
+        value: epipen
+          ? {
+              valueString: epipen === 'yes' ? 'Yes' : 'No',
+              note: epipen === 'yes' && form.text('epipen-detail') ? [{ text: form.text('epipen-detail') }] : undefined,
+            }
+          : undefined,
+      },
+    ]);
 
     await retractStale('AllergyIntolerance', subject, (k) => k.startsWith('allergy::'), allergyKeys, 'patient');
     await retractStale('Condition', subject, (k) => k.startsWith('chronic::'), chronicKeys);
