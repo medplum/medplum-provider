@@ -1,7 +1,7 @@
 # DJS Admission Screening — task plan
 
 Working plan for getting the wizard to a functioning, demonstrable
-prototype. Current as of commit `e2fbf7c`.
+prototype. Current as of commit `2148f2b`.
 
 **Target defined with the user:** a demo that *really saves* — backed by a
 real Medplum project, writing real FHIR, no duplicate-on-resave. Not just
@@ -27,8 +27,14 @@ deprioritised until the data path is trustworthy.
 | 8 | Idempotent saves via conditional upsert; fix orphaned `subject` | `0e8f04b` |
 | 11 | Retract findings the form no longer asserts | `0e8f04b` |
 | — | FHIR constraint fixes: `ait-1`, `con-3`, `ele-1` | `2b3fdba` |
-| 14 (part) | `formState`, field-integrity, and save-twice tests | `e2fbf7c` |
-| — | Unblock `npm install`; pin dependency versions | uncommitted |
+| — | Unblock `npm install`; pin dependency versions | `4a31626` |
+| 12 | Retract single-value fields (vitals, pain, complaint) | `cdfe972` |
+| 13 | Save the Epi-Pen fields | `cdfe972` |
+| 14 | DJS test coverage (constraint validity, subject, retraction, pain, read-back) | `e2fbf7c`, `cdfe972`, later files |
+| 15 | DJS patient summary + shared `screeningData` loader | `ac20232`, `e269d99`, `b7f71f1` |
+| 16 | Show DJS summary on the patient page | `f2d54cf` |
+| 10 | Form read-back on mount | `9d6d54f`, `de93193` |
+| — | Live-server tests: idempotency, constraint acceptance, retraction | `cfe0d4f`, `2148f2b` |
 
 Several of these were bugs found along the way rather than planned work:
 
@@ -46,7 +52,7 @@ Several of these were bugs found along the way rather than planned work:
   conditions used a text-only `clinicalStatus` that doesn't satisfy R4's
   required binding, and a `MedicationStatement` with no dosage or
   frequency emitted `dosage: [{}]`, violating `ele-1`.
-- **`npm install` was hard-failing (uncommitted).**
+- **`npm install` was hard-failing (`4a31626`).**
   `@medplum/eslint-config` was set to `^2.0.26`, resolving to 2.2.10 — a
   different major line that peer-requires `eslint@^8`, while every sibling
   `@medplum/*` is pinned at 5.1.27 and `eslint` resolves to 9.x. `ERESOLVE`
@@ -78,9 +84,7 @@ in sections that haven't been exercised with realistic data yet.
 
 ### Verified
 
-- **Against a live server:** routing, save toasts, pain slider, and the
-  `ait-1` allergy failure (which is what prompted the constraint fixes).
-- **Locally, by automated test (32 DJS tests):**
+- **Locally, by automated unit test (49 DJS tests, `npm test`):**
   - **Constraint validity** across all four sections, via `validateResource`
     — the `ait-1`/`con-3`/`ele-1` class, mutation-verified.
   - **Idempotent upsert** — saving a section twice updates in place.
@@ -88,25 +92,51 @@ in sections that haven't been exercised with realistic data yet.
   - **Subject integrity** — first-time save references a real patient
     (the task-8 orphan bug).
   - **Pain absent-vs-zero** — reported-but-unscored saves `dataAbsentReason`.
+  - **Form read-back** — a seeded patient's screening repopulates the form.
+  - **`screeningData` loader** — retraction/duplicate filtering; **DJS patient
+    summary** rendering, incl. a retracted finding staying off screen.
   - **Field integrity** and `FormState`/`parseItems` logic.
+- **Against a live server, by automated test (`npm run test:live`):** three
+  scenarios via a client-credentials login to a local Medplum stack — see
+  `AdmissionHealthScreeningWizard.live.test.tsx`. These are the checks
+  `MockClient` genuinely cannot make:
+  1. **Idempotency** — demographics saved twice → one Patient, one
+     Observation with a stable id.
+  2. **Constraint acceptance** — an allergy (`ait-1`), a chronic condition
+     and nursing diagnosis (`con-3`), and a no-dosage medication (`ele-1`)
+     all persist, i.e. the server *accepts* them. `validateResource` only
+     proxies this offline.
+  3. **Retraction round-trip** — unchecking an allergy marks it
+     `entered-in-error` on the server, not deleted.
+  - The live project is separate from `npm test` (see `vite.config.ts`) and
+    skips cleanly without `MEDPLUM_LIVE_CLIENT_ID`/`SECRET`.
+- **Also verified live by hand earlier:** routing, save toasts, pain slider,
+  and the original `ait-1` failure that prompted the constraint fixes.
 - **Locally, by hand:** `npm install` completes, `npm run build` passes.
 - **`react-router` stays at 7.18.1.** The `^8.3.0` bump was tested and
-  **reverted** — see the dependency note below.
+  **reverted** — see the dependency note above.
 
 ### Still needs a live server
 
-The offline tests above cover the write path's *logic*. A real server is
-still owed for, as a one-time smoke check:
+The live tests above now cover idempotency, constraint acceptance, and the
+retraction round-trip — the write-path behaviours that most needed a real
+server. Still not exercised against one:
 
-1. **Auth + real persistence** — genuine login and round-trip.
-2. **Validation beyond structural/FHIRPath** — AccessPolicy, terminology
-   binding to a real ValueSet, reference existence. `validateResource`
-   covers the constraint class that has actually bitten here, not these.
+1. **Transaction atomicity** — task 9; only meaningful once bundles are
+   implemented, and only verifiable on a real server (MockClient does not
+   roll transactions back).
+2. **AccessPolicy** — restricting the sensitive sections; not built yet.
+3. **Terminology binding / reference existence** — `validateResource`
+   covers the structural/FHIRPath constraint class, not these.
+
+Cheap live additions if wanted: read-back and the DJS summary against
+real data (both are covered offline against `MockClient` today).
 
 ### Full test suite state
 
 Baseline on `react-router` 7.18.1: **9 files / 44 tests failing, the rest
-passing.** None of the failures are in DJS code — all 32 DJS tests pass.
+passing.** None of the failures are in DJS code — all 49 DJS unit tests
+pass (plus 3 live tests, run separately via `npm run test:live`).
 
 The failures are the parent package's pre-existing Vitest/ESM limitation:
 `vi.spyOn()` on a module export (`useNavigate`, `PatientSummary`,
@@ -119,54 +149,28 @@ reverted; the earlier "15 / 76" was measured before this code state.
 
 ---
 
-## What the offline tests now cover, and what still needs a server
+## How the offline constraint check works (the `captureWrites` harness)
 
-**Task 14 is done (32 DJS tests).** The manual "save each section and see
-what FHIR rejects" pass is now automated. Key finding from probing
-`MockClient`: it does **not** validate on write — it will store an
+`MockClient` does **not** validate on write — it will store an
 `ait-1`-violating resource without complaint — but `validateResource` from
 `@medplum/core` reproduces the server's constraint checks *exactly* (same
 `ait-1` error text). So the `captureWrites` harness in
 `AdmissionHealthScreeningWizard.test.tsx` wraps every write, runs
 `validateResource`, and collects failures. The constraint test drives all
-four sections and asserts zero violations; it was mutation-verified —
+four sections and asserts zero violations; it was **mutation-verified** —
 removing the allergy `clinicalStatus` makes it fail with the real `ait-1`
-message, so the guard demonstrably bites. Retraction round-trip and
-first-save subject integrity are covered the same way, plus the pain
-absent-vs-zero case. `MockClient`'s conditional-upsert and `identifier`
-token-search semantics were confirmed to match the server.
+message, so the guard demonstrably bites. This is the offline proxy; the
+live constraint-acceptance test (above) is the real proof that the server
+accepts the same resources.
 
-**What still needs a live server** (one smoke check, not per-change):
-
-- **Auth and real persistence** — a genuine login and round-trip.
-- **Beyond structural/FHIRPath constraints** — `validateResource` covers
-  the class that has actually bitten here (`ait-1`/`con-3`/`ele-1`), but
-  not AccessPolicy rejections, terminology binding to a real ValueSet, or
-  reference-existence checks. Faithful for this prototype's known failure
-  modes; not a full server.
-
-### Tests still owed — but they belong to tasks 9 and 10, not 14
-
-- **Task 10 (read-back): no coverage, and the field-integrity grep can't
-  help.** That check greps `form.setText`/`form.text` symmetry in source;
-  read-back adds a resource → FormState mapping the regex can't see, so a
-  field that reads into the wrong key passes clean. Needs new tests that
-  *seed* `MockClient`, mount at `/admission-screening/:patientId`, and
-  assert inputs come back populated. `renderWizard` will need to take a
-  patient id (today it hard-codes the patient-less route).
-- **Task 9 (bundles): the save-twice test will need editing, and the
-  rollback property is untested.** Save-twice asserts on mechanism
-  (`createSpy` call count); moving writes into an `executeBatch` Bundle
-  hides them from that spy, though its `searchResources` assertions
-  survive. Nothing yet asserts a mid-save failure leaves *nothing*
-  written — task 9's whole point — so it could ship broken green. Add a
-  test that forces one write to reject and asserts rollback.
+Any new section or resource type should be driven through a test using
+`captureWrites` and asserting `capture.validationErrors` is empty.
 
 ---
 
 ## Open
 
-### 12 — Retract single-value fields — **DONE** (uncommitted)
+### 12 — Retract single-value fields — **DONE** (`cdfe972`)
 
 All 20 are now reconciled: the 14 single-value Observations plus the 6
 vision-acuity fields. Done via a new `saveObservationSet(subject, fields)`
@@ -185,7 +189,7 @@ Correctly excluded: the sign-off Observation is written unconditionally,
 so it can never be stale. Checklist-driven and ROS fields keep their
 existing task-11 scopes.
 
-### 13 — Save the Epi-Pen fields — **DONE** (uncommitted)
+### 13 — Save the Epi-Pen fields — **DONE** (`cdfe972`)
 
 Persisted in `saveAllergiesChronic` through `saveObservationSet`, so it
 gets upsert and retraction like everything else. A recorded "No" is saved
@@ -256,6 +260,38 @@ upsert already makes a partial save self-heal on the next save, so this is
 hardening, not a blocker. This is the one task that genuinely needs the
 backend to complete *and* verify.
 
+### 17 — Extend form read-back to the deferred fields
+
+`hydrateScreeningForm` (task 10) covers vitals, pain, complaint, allergies,
+chronic, appearance/ROS checklists, nursing diagnoses, nursing plan, and
+core demographics. Still not mapped back on resume, because their stored
+form is lossy or they're extra fields:
+
+- **Medications** — stored `dosage`+`frequency` merged into one string,
+  lossy to split back into the two table columns.
+- **Sign-off** — a formatted `valueString` (`Nurse: X; Physician: Y`) plus
+  health-alerts in a note; parse them back.
+- **Mandated-reporter** checkbox + RN initials.
+- **Extra demographics** — hair/eye colour, race, needs-interpreter,
+  birthplace, ethnicity chip, the 6-cell vision-acuity grid.
+- **`Other::` free text** on checklist items.
+
+Wiring is already in place — the mount effect applies whatever the pure
+function returns — so each is a mapping in `hydrateScreeningForm` plus a
+unit test.
+
+### 18 — Save `chronic-providers` / `-pcp` / `-comments` and `injuries-detail`
+
+Four text fields captured in the JSX (`value=form.text` / `onChange=
+form.setText`) but read by **no save handler**, so the input is silently
+discarded — the same epipen-class bug as task 13. Confirmed by grep: each
+key appears only at its JSX line. Fix by persisting them via
+`saveObservationSet` in the right section handler (chronic-* in
+`saveAllergiesChronic`, `injuries-detail` in `saveReviewOfSystems`), then
+add the reverse mapping to task 17. The field-integrity test **cannot**
+catch this class — a JSX `value=` read counts as a read — so it needs a
+targeted check or a manual JSX-vs-handler diff.
+
 ### 15 — DJS patient summary component — **DONE** (`ac20232`, `e269d99`, `b7f71f1`)
 
 Two pieces plus a unification:
@@ -275,7 +311,7 @@ Two pieces plus a unification:
   now come from `screeningData.ts`, so writer and reader share one
   definition of "retracted". Divergence there would be a silent bug.
 
-Not yet wired into any route — that's task 16. 40 DJS tests pass.
+Wired onto the patient page in task 16 (`f2d54cf`).
 
 Original brief, for reference:
 
@@ -336,19 +372,22 @@ Note `PatientPage.test.tsx` is one of the ~15 pre-existing failing files
 check whether the swap makes it pass, still fails for that same
 pre-existing reason, or fails for a new one.
 
-### 14 — Test coverage for the DJS wizard — **DONE** (uncommitted)
+### 14 — Test coverage for the DJS wizard — **DONE** (`e2fbf7c`, `cdfe972`, later files)
 
-32 DJS tests, following the parent package's Vitest pattern:
-`formState.test.ts` (24), `AdmissionHealthScreeningWizard.fieldIntegrity.test.ts`
-(3), and `AdmissionHealthScreeningWizard.test.tsx` (5: save-twice,
-constraint validity, subject integrity, retraction round-trip, pain
-absent-vs-zero). The `captureWrites` harness — validate every write via
-`validateResource`, collect failures — is reusable for future sections.
-The remaining owed tests (read-back, bundle rollback) belong to tasks 10
-and 9 and are described under "What the offline tests now cover" above.
+**49 DJS unit tests** plus **3 live tests**, following the parent package's
+Vitest pattern. Unit files: `formState.test.ts`,
+`AdmissionHealthScreeningWizard.fieldIntegrity.test.ts`,
+`AdmissionHealthScreeningWizard.test.tsx` (save-twice, constraint validity,
+subject integrity, retraction round-trip, pain absent-vs-zero, read-back),
+`screeningData.test.ts`, `hydrateScreening.test.ts`,
+`DjsPatientSummary.test.tsx`. Live file:
+`AdmissionHealthScreeningWizard.live.test.tsx` (idempotency, constraint
+acceptance, retraction — see the Verified section). The `captureWrites`
+harness is reusable for future sections.
 
-The original plan and parent-style reference notes follow, kept for
-whoever writes the task-9/10 cases.
+The only test still owed is the **bundle-rollback** case, which belongs to
+task 9 and can't be written until bundles exist (and only verified on a
+real server). The original plan and parent-style reference notes follow.
 
 ---
 
