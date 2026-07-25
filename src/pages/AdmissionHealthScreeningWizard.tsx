@@ -570,10 +570,12 @@ export function AdmissionHealthScreeningWizard({
       }
     }
 
-    // Task 13: the Epi-Pen yes/no and its detail box were rendered but read by
-    // no save handler at all, so the nurse's answer was silently discarded.
-    // Epi-Pen history matters for anaphylaxis response, so a recorded "No" is
-    // worth persisting too, not just a "Yes".
+    // Epi-Pen (task 13) and the three chronic free-text fields (task 18) were
+    // all rendered but read by no save handler, so the nurse's input was
+    // silently discarded. A recorded Epi-Pen "No" is worth persisting too, not
+    // just a "Yes" — absence matters for anaphylaxis response. saveObservationSet
+    // derives its retraction scope from these codes, so clearing any one later
+    // withdraws its Observation rather than leaving a stale value.
     const epipen = form.chip('epipen');
     await saveObservationSet(subject, [
       {
@@ -584,6 +586,18 @@ export function AdmissionHealthScreeningWizard({
               note: epipen === 'yes' && form.text('epipen-detail') ? [{ text: form.text('epipen-detail') }] : undefined,
             }
           : undefined,
+      },
+      {
+        code: 'Doctors/specialists managing chronic conditions',
+        value: form.text('chronic-providers') ? { valueString: form.text('chronic-providers') } : undefined,
+      },
+      {
+        code: 'Primary care provider',
+        value: form.text('chronic-pcp') ? { valueString: form.text('chronic-pcp') } : undefined,
+      },
+      {
+        code: 'Chronic conditions: additional comments',
+        value: form.text('chronic-comments') ? { valueString: form.text('chronic-comments') } : undefined,
       },
     ]);
 
@@ -615,7 +629,8 @@ export function AdmissionHealthScreeningWizard({
     const DENTAL_EXAM = 'Last dental exam';
     const VISION_EXAM = 'Last vision exam';
     const ROS_COMMENTS = 'Review of systems: additional comments';
-    const singleFieldKeys = [DENTAL_EXAM, VISION_EXAM, ROS_COMMENTS];
+    const INJURIES_DETAIL = 'Injuries/trauma: details';
+    const singleFieldKeys = [DENTAL_EXAM, VISION_EXAM, ROS_COMMENTS, INJURIES_DETAIL];
 
     const liveKeys = new Set<string>();
     for (const [grid, label] of systems) {
@@ -641,9 +656,13 @@ export function AdmissionHealthScreeningWizard({
       liveKeys.add(ROS_COMMENTS);
       await obs(subject, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
     }
+    if (form.text('injuries-detail')) {
+      liveKeys.add(INJURIES_DETAIL);
+      await obs(subject, { code: { text: INJURIES_DETAIL }, valueString: form.text('injuries-detail') });
+    }
 
     // Scope covers both the checklist rows (which carry a `::item` suffix) and
-    // this section's three single-value fields, so clearing a text box retracts
+    // this section's single-value text fields, so clearing a text box retracts
     // its Observation too rather than leaving a stale value in the chart.
     await retractStale(
       'Observation',

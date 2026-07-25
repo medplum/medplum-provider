@@ -36,6 +36,16 @@ function fieldInput(label: string): HTMLInputElement {
   return input as HTMLInputElement;
 }
 
+/** Same lookup as `fieldInput`, for the `<textarea>` fields (comments, details). */
+function fieldTextarea(label: string): HTMLTextAreaElement {
+  const container = screen.getByText(label).closest('.djs-field');
+  const textarea = container?.querySelector('textarea');
+  if (!textarea) {
+    throw new Error(`Could not find a <textarea> inside the field for label "${label}"`);
+  }
+  return textarea as HTMLTextAreaElement;
+}
+
 async function renderWizard(medplum: MockClient): Promise<void> {
   await act(async () => {
     render(
@@ -431,6 +441,48 @@ describe('AdmissionHealthScreeningWizard', () => {
       await goToStep(user, 'Current Health Status');
       await waitFor(() => expect(fieldInput('Temp (°F)').value).toBe('99.1'));
       expect(checkbox('Latex allergy').checked).toBe(true);
+    });
+  });
+
+  describe('free-text field persistence (task 18)', () => {
+    // These four fields were rendered but read by no save handler, so the
+    // nurse's input was silently discarded (epipen-class data loss). The
+    // field-integrity grep cannot catch this class — a JSX `value=` read looks
+    // like a read — so this drives them through the UI and asserts each one
+    // actually persisted as an Observation.
+    test('chronic providers/pcp/comments and injuries detail are saved', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      // Health status → chronic "yes" reveals the three free-text fields.
+      await goToStep(user, 'Current Health Status');
+      await user.click(screen.getByRole('button', { name: /has one or more/i }));
+      await user.type(fieldInput('Doctors / specialists managing these conditions'), 'Dr Chen (pulmonology)');
+      await user.type(fieldInput('Primary care provider (if known)'), 'Dr Patel');
+      await user.type(fieldTextarea('Additional comments'), 'Asthma well controlled on inhaler');
+      await saveSection(user, /save health status/i);
+
+      // Review of systems → injuries detail.
+      await goToStep(user, 'Review of Systems');
+      await user.type(fieldTextarea('Details, dates, treatment'), 'Fractured wrist 2023, healed');
+      await saveSection(user, /save review of systems/i);
+
+      // Identify each Observation by its screening identifier alone — one
+      // patient in this test, so no subject filter is needed (and it avoids a
+      // flaky empty-criteria Patient search).
+      const byCode = async (code: string): Promise<string | undefined> => {
+        const [obs] = await medplum.searchResources('Observation', {
+          identifier: `${SCREENING_ID_SYSTEM}|${code}`,
+        });
+        return obs?.valueString;
+      };
+
+      expect(await byCode('Doctors/specialists managing chronic conditions')).toBe('Dr Chen (pulmonology)');
+      expect(await byCode('Primary care provider')).toBe('Dr Patel');
+      expect(await byCode('Chronic conditions: additional comments')).toBe('Asthma well controlled on inhaler');
+      expect(await byCode('Injuries/trauma: details')).toBe('Fractured wrist 2023, healed');
     });
   });
 });
