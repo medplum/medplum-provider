@@ -1,7 +1,7 @@
 # DJS Admission Screening — task plan
 
 Working plan for getting the wizard to a functioning, demonstrable
-prototype. Current as of commit `abd1961`.
+prototype. Current as of commit `8df731b`.
 
 **Target defined with the user:** a demo that *really saves* — backed by a
 real Medplum project, writing real FHIR, no duplicate-on-resave. Not just
@@ -230,44 +230,37 @@ Found while mapping — **task 18**: `chronic-providers`, `chronic-pcp`,
 by no save handler (epipen-class data loss). Read-back can't restore what
 isn't persisted, so the write must be fixed first.
 
-### 9 — Batch each section's writes into a transaction Bundle — **ATTEMPTED, reverted; do on the backend**
+### 9 — Batch each section's writes into a transaction Bundle — **DONE (unit); awaiting live confirmation** (`8df731b`, harness `a5ab376`)
 
-Each handler issues N sequential awaited writes with no transaction, so a
-failure mid-save leaves the section half-persisted. The fix is one FHIR
-`transaction` Bundle per section.
+Each section's creates/upserts now accumulate into a `ScreeningBundle` and
+commit as one FHIR `transaction` via `executeBatch`, so on a real server a
+mid-save failure leaves the section wholly unwritten instead of
+half-persisted. The Patient upsert and the retraction searches still run
+before the bundle; **retractions stay direct `updateResource`** — they
+target prior-save data (not this save's new writes), and this sidesteps the
+MockClient quirk below.
 
-**This was implemented in full and then reverted.** Why: it can't be
-verified against `MockClient`, and it broke a green test that a real
-server wouldn't. Probing `MockClient.executeBatch` found:
+Two MockClient realities shaped the design (both confirmed by probes):
 
-1. Transaction bundles + conditional PUT **work** for create and
-   same-session conditional-match update.
-2. But MockClient does **not enforce transaction atomicity** — an
-   `ait-1`-violating entry did not roll the bundle back. So task 9's whole
-   point (a mid-save failure leaves nothing written) is **unverifiable**
-   against the mock.
-3. Worse, a resource **created via a bundle** conditional PUT is not
-   reliably found by a later `searchResources` in the running component
-   flow — `searchResources('AllergyIntolerance', {})` returned 0 in the
-   second save though the resource existed. That broke the retraction
-   round-trip test, on a MockClient limitation, not a real bug.
+1. It does **not enforce transaction atomicity** — a bad entry does not roll
+   the bundle back. So task 9's defining property is **unverifiable offline**;
+   a **live atomicity test** covers it (submit one valid + one `ait-1`
+   entry, assert the server rejects the whole bundle and persists neither).
+2. A **bundle-created** resource isn't found by a later in-component
+   `searchResources`. So the retraction round-trip unit test now seeds its
+   prior allergy via `createResource` + read-back rather than a first
+   bundle-save; the full check→save→uncheck→save flow is covered by the live
+   retraction test.
 
-The refactor (one `ScreeningBundle` per section's onClick; `obs`/upserts
-append entries; `commitBundle` → `executeBatch({type:'transaction'})`;
-retractions kept as direct idempotent `updateResource` on prior-save data)
-got 5/6 wizard tests green, but the 6th can't pass on the mock and
-atomicity can't be shown offline either way. Reverted to the
-sequential-upsert version (**49 DJS tests green**).
+`captureWrites` intercepts `executeBatch`, so the constraint, subject, and
+retraction tests still validate every bundled resource. **50 DJS unit tests
+pass, stable across repeated runs.**
 
-Kept: the checkpoint-1 harness change (`captureWrites` intercepts
-`executeBatch`, `a5ab376`) — harmless with no producer, and needed when
-this lands.
-
-**Recommendation: implement on the real backend**, where the transaction
-is actually atomic and testable. Low urgency regardless — conditional
-upsert already makes a partial save self-heal on the next save, so this is
-hardening, not a blocker. This is the one task that genuinely needs the
-backend to complete *and* verify.
+**Remaining: run `npm run test:live`.** The three existing live tests now
+exercise the bundle path (saves go through `executeBatch`), plus the new
+atomicity test — 4 total. Not marked fully done until that run is green,
+since the live tests have twice caught real server-only bugs the mock
+couldn't (`ait-2`, the bare-`system|` search).
 
 ### 17 — Extend form read-back to the deferred fields
 
