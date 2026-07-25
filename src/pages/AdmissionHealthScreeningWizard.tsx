@@ -296,23 +296,18 @@ export function AdmissionHealthScreeningWizard({
     liveKeys: Set<string>,
     param: 'subject' | 'patient' = 'subject'
   ): Promise<void> {
-    // Narrow server-side by identifier system where supported. The
-    // `system|` token form is standard FHIR but not universally implemented,
-    // so fall back to fetching the patient's resources and filtering below —
-    // a rejected search must not take the whole save down with it.
-    let existing;
-    try {
-      existing = await medplum.searchResources(resourceType, {
-        identifier: `${SCREENING_ID_SYSTEM}|`,
-        [param]: subject.reference as string,
-        _count: 200,
-      });
-    } catch {
-      existing = await medplum.searchResources(resourceType, {
-        [param]: subject.reference as string,
-        _count: 200,
-      });
-    }
+    // Fetch this patient's resources of this type and filter to our screening
+    // system client-side. We deliberately do NOT narrow with a bare
+    // `identifier=system|` token search: MockClient matches it, but the live
+    // Medplum server returns nothing for it (empty value read literally),
+    // which silently broke retraction — a withdrawn finding stayed active on
+    // the real server while every offline test passed. The client-side system
+    // filter below is the actual correctness guarantee; the `_count` cap is
+    // generous for an admission screening's bounded resource set.
+    const existing = await medplum.searchResources(resourceType, {
+      [param]: subject.reference as string,
+      _count: 200,
+    });
 
     for (const res of existing) {
       const key = res.identifier?.find((i) => i.system === SCREENING_ID_SYSTEM)?.value;

@@ -61,17 +61,21 @@ function lastUpdated(res: Resource): string {
 /**
  * Searches one resource type for a patient's screening resources, then filters:
  *
+ * - **Non-screening** resources are dropped — the search fetches the patient's
+ *   whole chart of this type, so only those carrying our identifier are kept.
  * - **Retracted** resources are dropped — a withdrawn finding must not surface.
- * - **Non-screening** resources are dropped — the fallback search (below) has no
- *   identifier filter and would otherwise return the patient's whole chart.
  * - **Duplicates** — the pre-`0e8f04b` bugs left multiple resources under one
  *   key; keep only the most recently updated, so legacy data reads cleanly.
  *
- * The narrow `identifier=system|` search is tried first; a server that rejects
- * that token form falls back to fetching by patient and filtering here. Either
- * way the client-side filter runs, so the result is correct in both paths.
- * Subject-less orphans from the old bug simply never match a patient-scoped
- * search, which is the right outcome — they can't be attributed to anyone.
+ * We search by patient/subject only and filter to our system client-side,
+ * rather than narrowing with a bare `identifier=system|` token: MockClient
+ * matches that form, but the live Medplum server returns nothing for it —
+ * which would make the summary and read-back show an empty screening even when
+ * data exists. The client-side filter is the correctness guarantee, and it
+ * runs regardless. Subject-less orphans from the old bug simply never match a
+ * patient-scoped search, which is the right outcome — they can't be attributed
+ * to anyone. The `_count` cap is generous for an admission screening's bounded
+ * resource set.
  */
 async function searchScreening<T extends Resource>(
   medplum: MedplumClient,
@@ -79,19 +83,10 @@ async function searchScreening<T extends Resource>(
   param: 'subject' | 'patient',
   patientRef: string
 ): Promise<T[]> {
-  let results: Resource[];
-  try {
-    results = (await medplum.searchResources(resourceType as 'Observation', {
-      [param]: patientRef,
-      identifier: `${SCREENING_ID_SYSTEM}|`,
-      _count: 200,
-    })) as Resource[];
-  } catch {
-    results = (await medplum.searchResources(resourceType as 'Observation', {
-      [param]: patientRef,
-      _count: 200,
-    })) as Resource[];
-  }
+  const results = (await medplum.searchResources(resourceType as 'Observation', {
+    [param]: patientRef,
+    _count: 200,
+  })) as Resource[];
 
   const byKey = new Map<string, T>();
   for (const res of results) {
