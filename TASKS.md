@@ -115,6 +115,103 @@ transaction Bundle per section.
 Partly a refactor of whatever tasks 10 and 12 land on, so it's cheaper
 after them than before.
 
+### 14 — Test coverage for the DJS wizard, matching the parent package's style
+
+There is currently no coverage for any DJS code, despite an established
+Vitest pattern throughout the rest of `medplum-provider` (colocated
+`*.test.ts(x)` files, `describe`/`test` from `vitest`). This task ports
+that pattern onto the wizard rather than inventing a new one.
+
+**Reference files already in the repo that define "the parent style":**
+- `src/pages/meds/OrderMedicationPage.test.tsx` — component/page pattern:
+  render with `MantineProvider` → `MedplumProvider medplum={new MockClient()}`
+  → `MemoryRouter`/`Routes`, drive it with `@testing-library/user-event`,
+  assert on `vi.spyOn(medplum, 'createResource' | 'updateResource')` calls.
+- `src/components/meds/quantity-qualifiers.test.ts` — pure-logic pattern
+  for a sibling file with no React/Medplum involved: plain `describe`/`test`
+  over exported functions, one `describe` block per function, regression
+  cases documented inline with a comment explaining the bug they lock in.
+- `src/test.setup.ts` — already wired via `vitest.config` (`setupFiles`),
+  indexes FHIR StructureDefinitions/SearchParameters so `MockClient`
+  resources validate. Nothing to add here.
+
+**Steps, roughly in order:**
+
+1. **DONE — `src/pages/formState.test.ts`.** Pure-logic tests for
+   `FormState` (`chip`/`setChip`, `text`/`setText`,
+   `checkedItems`/`checkTextMap`, `rows`/`setRows`) and `parseItems()`,
+   using `renderHook`/`act` from `@testing-library/react` per the repo's
+   own `useSchedulingStartsAt.test.tsx` pattern. Covers the trailing-`|`
+   bug (and the same failure at a leading `|`) plus `::text` free-text
+   marker parsing. 24/24 passing.
+
+   Running the full suite (`npm test`) surfaced 15 pre-existing failing
+   files / 76 failing tests, all unrelated to this file — every one is
+   `TypeError: Cannot spy on export "X". Module namespace is not
+   configurable in ESM.` from `vi.spyOn()` on a module export (e.g.
+   `useNavigate`, `PatientSummary`) in files like `TaskPanel.test.tsx`,
+   `PatientPage.test.tsx`, `TasksPage.test.tsx`. Pre-existing Vitest/ESM
+   limitation in the parent package, not introduced by DJS work — left
+   alone by design; out of scope here.
+
+2. **DONE — `src/pages/AdmissionHealthScreeningWizard.fieldIntegrity.test.ts`.**
+   Ports the field-integrity script and the `code.text` collision grep
+   from `CLAUDE.md` verbatim (same regexes) into three Vitest tests:
+   read-but-never-set is asserted empty with no allowlist; set-but-never-
+   read is asserted to *exactly* match a documented list split into
+   `KNOWN_SCRIPT_BLIND_SPOTS` (permanent — `injuries`/`firearm-safety`/
+   `infectious`, read only through a loop variable) and `KNOWN_OPEN_BUGS`
+   (currently just `epipen`, tied to task 13 — the list is meant to
+   shrink, and the test comment says so explicitly); collision check on
+   `code: { text: '...' }` duplicates. All three pass against the current
+   source. Whoever closes task 13 should delete `epipen` from
+   `KNOWN_OPEN_BUGS` in the same change — the test will fail with
+   "expected list not to contain 'epipen'" as a reminder if they forget.
+
+3. **`src/pages/AdmissionHealthScreeningWizard.test.tsx`** — component
+   tests following `OrderMedicationPage.test.tsx`'s render setup. Priority
+   order for what to cover:
+   - **DONE — Save-twice idempotency**
+     (`src/pages/AdmissionHealthScreeningWizard.test.tsx`). Fills Last
+     name + Color of hair on the demographics section, saves twice with
+     no edits in between. Asserts `createResource` fires exactly once
+     (Patient created only on save #1, updated via `updateResource` on
+     save #2 — the orphaned-subject/duplicate-patient regression from
+     task 8), and that `medplum.searchResources` for the Hair color
+     Observation returns exactly one resource, same `id`, after both
+     saves — proving the conditional upsert lands as an update rather
+     than a second resource. Not executed against a live server (no
+     network in the environment that wrote it) — please confirm with
+     `npx vitest run src/pages/AdmissionHealthScreeningWizard.test.tsx`.
+   - Orphaned-subject regression: first-time save on a fresh
+     `/admission-screening` route (no existing Patient) — assert every
+     written resource's `subject`/`patient` reference is defined, never
+     `undefined`. This is the exact bug `ensurePatientRef()` exists to
+     prevent.
+   - Retraction round-trip: check an item, save, uncheck it, save again —
+     assert the resource comes back `status: 'entered-in-error'` (or
+     `verificationStatus` for Condition/AllergyIntolerance), not deleted
+     and not still active.
+   - `painScale` absent-vs-zero: an untouched pain slider must save a
+     `dataAbsentReason`, not a coded `0`.
+   - Once tasks 12/13 land: single-value retraction (a cleared vital
+     doesn't leave its old value asserted) and Epi-Pen fields actually
+     appearing in the save call.
+
+4. **Sequencing note:** steps 1 and 2 are pure-logic/static, safe to write
+   immediately, and give the most protection per hour. Step 3's
+   retraction and Epi-Pen cases are cheapest to write *after* tasks 12 and
+   13 land — otherwise the test either asserts today's buggy behavior or
+   has to be written red and left failing on purpose. If 12/13 are still
+   open when this is picked up, write those two cases last, or as
+   deliberately-failing (`test.fails`) placeholders that document the gap.
+
+5. **Housekeeping:** convert new test files to CRLF before considering
+   the task done (see Formatting section below — the repo-wide sed
+   command covers `.ts`/`.tsx`), and confirm `npm run build` still passes
+   (it type-checks test files too, so a type error in a new test breaks
+   the build same as app code).
+
 ---
 
 ## Backlog — not scoped, needed before real use
@@ -128,9 +225,7 @@ after them than before.
   ranges, no date sanity.
 - **AccessPolicy.** Nothing restricts the sensitive sections beyond
   default patient-record access, for a minor population in state custody.
-- **Tests.** No coverage for any DJS code, despite an established Vitest
-  pattern throughout the rest of the repo. The field-integrity check is
-  the highest-value first test.
+- **Tests.** See task 14.
 - **Pull the wizard out of the AppShell.** Deliberately deferred. It draws
   its own gov banner/header/sidebar/footer at `100vh`, so chrome nests
   inside Medplum's. Needs `App.tsx` restructured, since `AppShell` wraps
