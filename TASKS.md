@@ -200,11 +200,13 @@ partially-completed screening shows blank fields. A nurse interrupted
 mid-screening can't pick up where they left off, which a real admission
 workflow needs.
 
-Search by `SCREENING_ID_SYSTEM` identifier for the patient/encounter and
-map results back into `FormState` keys. Note this **doubles the surface
-for the "field wired in the JSX but missing from the handler" bug class** —
-run the field-integrity script in `CLAUDE.md` before and after, or better,
-turn it into a real test first.
+Use `loadScreeningResources` from `screeningData.ts` (built for task 15) to
+fetch and filter the resources, then map them back into `FormState` keys by
+their screening identifier. The load/filter/dedupe half is done; what's left
+is the resource → FormState mapping. Note this **doubles the surface for the
+"field wired in the JSX but missing from the handler" bug class** — run the
+field-integrity script in `CLAUDE.md` before and after, or better, turn it
+into a real test first.
 
 ### 9 — Batch each section's writes into a transaction Bundle
 
@@ -215,7 +217,28 @@ transaction Bundle per section.
 Partly a refactor of whatever tasks 10 and 12 land on, so it's cheaper
 after them than before.
 
-### 15 — DJS patient summary component showing saved screening data
+### 15 — DJS patient summary component — **DONE** (`ac20232`, `e269d99`, `b7f71f1`)
+
+Two pieces plus a unification:
+
+- **`src/pages/screeningData.ts`** — `loadScreeningResources(medplum,
+  patientId)`, the shared reader. Searches the five screening resource
+  types, drops retracted resources, drops non-screening resources (the
+  fallback search has no identifier filter), and collapses legacy
+  duplicates to the most recent per key. This is also the primitive task
+  10 (read-back) should build on. 5 tests.
+- **`src/components/DjsPatientSummary.tsx`** — compact read-only summary
+  (vitals, pain, allergies, chronic, medications, nursing diagnoses,
+  sign-off), each section shown only if present, with empty/loading/error
+  states, styled in `.djs-*` inside `.djs-root`. 3 tests, including that a
+  retracted finding stays off screen.
+- **Unification** — the wizard's `SCREENING_ID_SYSTEM` and `isRetracted`
+  now come from `screeningData.ts`, so writer and reader share one
+  definition of "retracted". Divergence there would be a silent bug.
+
+Not yet wired into any route — that's task 16. 40 DJS tests pass.
+
+Original brief, for reference:
 
 Build a DJS-styled patient summary that surfaces what the wizard saves —
 vitals (temp, pulse, resp, BP, weight, height, BMI), allergies, chronic
