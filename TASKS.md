@@ -126,16 +126,14 @@ Suggested order, easiest/highest-value first:
    Other::text grids with this bug. Mutation-verified fix, tracked as the
    now-closed task 21.
 
-4. **Extra demographics from `Patient.extension`** — race
-   (`us-core-race`), ethnicity/hispanic (`us-core-ethnicity`),
-   needs-interpreter (informal `needs-interpreter` extension), birthplace
-   (`patient-birthPlace`). All read off `patient.extension` in
-   `savePatientRecord` (~line 375–392) with known URLs — grep those URLs to
-   confirm before mapping. Hair/eye colour are **not** extensions, they're
-   plain Observations (`'Hair color'`/`'Eye color'` codes) — check whether
-   those two are already mapped in `hydrateScreeningForm` before
-   re-adding them (they may already be covered as generic Observations;
-   confirm with the field list at the top of `hydrateScreening.ts` first).
+4. **Extra demographics from `Patient.extension`** — **DONE** (`7cf6ae2`).
+   birthplace, ethnicity/hispanic, needs-interpreter, race, plus hair/eye
+   colour (plain Observations, turned out to be unmapped too — folded in
+   here). `findExtension()` helper added. Race is the interesting case: any
+   comma-split token not matching the grid's own 5 labels is treated as the
+   "Other" free text; a token containing an internal comma in the original
+   free text will split and get rejoined — documented limitation, same
+   comma hazard as task 20.
 
 5. **Vision-acuity grid (6 fields)** — `vision-nocorr-left/right/both`,
    `vision-corr-left/right/both`. Already saved as 6 separate Observations
