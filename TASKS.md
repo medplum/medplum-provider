@@ -111,17 +111,20 @@ Suggested order, easiest/highest-value first:
    table as step 1 (`textOrDateTime` reads whichever of `valueString`/
    `valueDateTime` the field used, so one generic branch covers all seven).
 
-3. **`Other::` free text on checklist items.** Currently `hydrateScreeningForm`
-   restores the checkbox toggle (`checks[grid]`) from the identifier suffix,
-   but not the typed-in text next to "Other" — that lives only in the
-   Observation's `code.text`/`valueString` (see `saveReviewOfSystems` /
-   `saveAllergiesChronic`: `checkTextMap(grid)[item] || item` is what gets
-   written, keyed by the *original* item name via the identifier suffix, not
-   the typed text). To restore it: for a checklist item whose stored value
-   differs from its own key name, that stored value **is** the free text —
-   write it into `checkTextMap`/`form.setCheckText(grid, item, text)`
-   alongside toggling the checkbox. Needs a test seeding an "Other: <text>"
-   Observation and asserting both the checkbox and the text field come back.
+3. **`Other::` free text on checklist items** — **DONE** (`bbd0015`). New
+   `HydratedForm.checkTexts` bucket, applied via `form.setCheckText` in the
+   mount effect. Covers all six Other::text grids that carry it through a
+   resource (appearance + 3 ROS grids via one shared branch; allergy and
+   chronic-list via their own `code.text`). `race`'s Other::text stays out
+   of scope — it's a Patient extension, not an Observation, and race itself
+   isn't mapped yet (step 4 below).
+
+   **Found and fixed in the same commit, not caused by it:** `saveMentalStatus`
+   was writing `valueString: item` instead of `checkTextMap('appearance')[item]
+   || item` — the *save* side for appearance's Other:: text was silently
+   discarding it (epipen/task-18/19 class), the only one of the seven
+   Other::text grids with this bug. Mutation-verified fix, tracked as the
+   now-closed task 21.
 
 4. **Extra demographics from `Patient.extension`** — race
    (`us-core-race`), ethnicity/hispanic (`us-core-ethnicity`),
