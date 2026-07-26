@@ -468,3 +468,33 @@ recorded in the task tracker.
 `react-router`) are the *only* version control in this repo — don't
 loosen them without re-running the full parent-package suite to check for
 regressions, the way the `react-router` v8 attempt was caught.
+
+### Task 38 — replace `preview.html` with a MockClient-backed demo route
+
+`preview.html` is a hand-maintained static mirror of the wizard, and it
+drifts by construction. Verified 2026-07-26: it has the right 4 sections
+(last updated `226ffbb`, 2026-07-24) but **missed the last two UI
+changes** — BP is still one `120/80` box (task 25 split it in two) and
+facility is still free text (task 24 made it a closed `<select>`). It also
+never loads `tokens.css`, so it isn't a valid styling reference either.
+Once design/product contributors arrive, a wrong preview is worse than
+none: they'd design against fields that no longer exist.
+
+**Don't just delete it — it serves a real need:** viewing the UI *without
+Medplum credentials*. The wizard requires sign-in and incoming design folks
+won't have a server.
+
+Approach (agreed with the user): a demo route rendering the wizard inside a
+`MedplumProvider` backed by `MockClient`. Real components, real
+`tokens.css`, no credentials, and in sync by construction because it **is**
+the app. Already proven — `AdmissionHealthScreeningWizard.test.tsx` does
+exactly this via `renderWizard(new MockClient())`.
+
+Two things to get right: make it unmistakably a demo (a visible banner, not
+just a URL) so nobody thinks they're seeing live patient data; and decide
+whether it ships in the production build — lean dev-only. Writes land in
+the in-memory client so nothing reaches a real server, but that should be
+stated, not incidental.
+
+Also remove the `preview.html` references in `README.md`, `CLAUDE.md` and
+`CONTRIBUTING.md`, pointing them at the demo route instead.

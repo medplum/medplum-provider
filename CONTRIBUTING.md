@@ -260,9 +260,10 @@ profile's requirements rather than just adding a label.
 
 ## 7. Housekeeping
 
-- **Line endings are CRLF** (Windows). If your editor or an AI assistant writes
-  a file with Unix line endings, the whole file shows as changed. There's a
-  conversion snippet in `CLAUDE.md`.
+- **Line endings are handled for you.** `.gitattributes` normalizes them, so
+  don't convert files by hand or let an AI assistant do it "to be safe". If a
+  file you barely touched shows as entirely changed, stop and ask — that's a
+  real signal, not something to paper over.
 - **Commit source changes only** — no build output, no `node_modules`.
 - `TASKS.md` is the source of truth for what's done and what's planned,
   including *why* decisions were made. If you make a decision that a future
@@ -337,7 +338,8 @@ none of them announce themselves.
 
 17. Bare element selector added to `tokens.css` (would restyle the host app).
 18. Mantine components introduced into DJS screens.
-19. CRLF line endings preserved; no build output or `node_modules` committed.
+19. No build output or `node_modules` committed. No whole-file line-ending
+    churn burying the real change.
 20. Decisions a future reader would find surprising written down in `TASKS.md`.
 
 ### How to make review fast

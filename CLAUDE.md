@@ -330,16 +330,31 @@ server available.
 
 ## Formatting
 
-**CRLF, not LF** — committed from Windows, `.gitattributes` enforces it.
-Convert generated files:
+**`.gitattributes` handles line endings — don't convert files by hand.**
 
-```bash
-find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.md" -o -name "*.html" \) \
-  -not -path "./node_modules/*" \
-  -exec sh -c 'sed -i "s/\r$//" "$1" && sed -i "s/$/\r/" "$1"' _ {} \;
-```
+`* text=auto eol=crlf` means git normalizes to LF *in the repository* and
+converts to CRLF *on checkout*. Verified 2026-07-26: files committed with
+and without a manual `sed` conversion are stored **identically** in the
+repo, and a README committed with no conversion at all came out correct.
 
-## `preview.html`
+Earlier guidance here prescribed a `find … sed` pass before every commit.
+That step was redundant — it changed the working tree, not what git
+stored. Dropped. If you see a whole file show as modified when you only
+changed a line, that's a line-ending problem worth investigating, but
+reach for `git config core.autocrlf` / `.gitattributes` rather than
+rewriting the file.
+
+## `preview.html` — **deprecated, being removed (task 38)**
+
+**Don't trust it, and don't spend effort updating it.** Verified stale
+2026-07-26: it missed the last two UI changes (blood pressure is still one
+`120/80` box; facility is still a free-text input, not the closed
+`<select>`), and it never loads `tokens.css` so it isn't a valid styling
+reference either. Being replaced by a `MockClient`-backed demo route that
+renders the real wizard — same no-credentials capability, in sync by
+construction. See TASKS.md task 38.
+
+Original description, for context until it's removed:
 
 Static, dependency-free mirror of the wizard for a quick visual check with
 no build step. **Hand-maintained, not generated** — update it in the same
