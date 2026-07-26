@@ -135,12 +135,11 @@ Suggested order, easiest/highest-value first:
    free text will split and get rejoined — documented limitation, same
    comma hazard as task 20.
 
-5. **Vision-acuity grid (6 fields)** — `vision-nocorr-left/right/both`,
-   `vision-corr-left/right/both`. Already saved as 6 separate Observations
-   in `saveVitals`'s `visionFields` loop with fixed labels ("Visual acuity,
-   left eye, without correction", etc. — see that array in the source for
-   the exact 6 strings). Straightforward `valueString` → `texts[key]`
-   mapping, one entry per field, no parsing needed.
+5. **Vision-acuity grid (6 fields) + glasses history** — **DONE** (`d6f6e84`).
+   Vision acuity was trivial, per the original plan. Glasses history folded
+   in too (found unmapped, same area): its save side already conflates
+   "no detail typed" with a literal "Yes" value, so read-back mirrors that
+   same imprecision rather than pretending to resolve it.
 
 6. **Medications** (lossiest — do last). `dosage`+`frequency` are merged
    into one string on save (`[dosage, frequency].filter(Boolean).join(', ')`
