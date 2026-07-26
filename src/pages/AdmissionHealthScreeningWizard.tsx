@@ -1,5 +1,5 @@
 import { createReference, WithId } from '@medplum/core';
-import { Bundle, BundleEntry, Encounter, Observation, Reference } from '@medplum/fhirtypes';
+import { Encounter, Observation, Reference } from '@medplum/fhirtypes';
 import { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
@@ -222,45 +222,7 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /**
-   * Accumulates a section's creates/updates so they commit as one FHIR
-   * `transaction` Bundle instead of N sequential requests. On a real server the
-   * transaction is atomic — a failure part-way leaves the section wholly
-   * unwritten rather than half-persisted. The reads that decide *what* to write
-   * (the Patient upsert that yields the subject reference, and the retraction
-   * searches) still run before the bundle; only the mutations are batched.
-   *
-   * Retractions are intentionally NOT bundled — see `retractStale`.
-   */
-  type ScreeningBundle = { entry: BundleEntry[] };
-
-  function newBundle(): ScreeningBundle {
-    return { entry: [] };
-  }
-
-  /** Append a conditional upsert (PUT with a search URL, matched server-side by identifier). */
-  function bundleUpsert(
-    bundle: ScreeningBundle,
-    resource: Observation | Record<string, unknown>,
-    query: Record<string, string>
-  ): void {
-    bundle.entry.push({
-      request: {
-        method: 'PUT',
-        url: `${(resource as { resourceType: string }).resourceType}?${new URLSearchParams(query).toString()}`,
-      },
-      resource: resource as BundleEntry['resource'],
-    });
-  }
-
-  async function commitBundle(bundle: ScreeningBundle): Promise<void> {
-    if (bundle.entry.length === 0) {
-      return;
-    }
-    await medplum.executeBatch({ resourceType: 'Bundle', type: 'transaction', entry: bundle.entry } as Bundle);
-  }
-
-  /**
-   * Appends one Observation per screening field to the section bundle.
+   * Writes one Observation per screening field.
    *
    * The identifier is derived from `code.text` — the same string that defines
    * what the Observation means — plus `itemKey` for checklist rows, where one
@@ -268,11 +230,14 @@ export function AdmissionHealthScreeningWizard({
    * call site means the key cannot drift out of sync with the resource it
    * labels, which is the failure mode this file has a long history of.
    */
-  function obs(bundle: ScreeningBundle, subject: Reference<Patient>, partial: Partial<Observation>, itemKey?: string): void {
+  async function obs(
+    subject: Reference<Patient>,
+    partial: Partial<Observation>,
+    itemKey?: string
+  ): Promise<void> {
     const codeText = partial.code?.text ?? 'Unspecified screening finding';
     const key = itemKey ? `${codeText}::${itemKey}` : codeText;
-    bundleUpsert(
-      bundle,
+    await medplum.upsertResource<Observation>(
       {
         resourceType: 'Observation',
         status: 'final',
@@ -333,14 +298,6 @@ export function AdmissionHealthScreeningWizard({
    * `inScope` is what keeps this section-local: without it, saving one section
    * would retract every other section's findings, since none of their keys
    * appear in this section's live set.
-   *
-   * Applied as direct idempotent updates, NOT folded into the section's
-   * transaction bundle: they target prior-save resources (not this save's new
-   * data, which is what the transaction protects), and a retraction re-applied
-   * on the next save is harmless — so the marginal atomicity isn't worth the
-   * cost. (It also sidesteps a MockClient quirk: it won't update a
-   * bundle-conditionally-created resource via a second bundle PUT, though a
-   * real server does.)
    */
   async function retractStale(
     resourceType: 'Observation' | 'Condition' | 'AllergyIntolerance' | 'MedicationStatement',
@@ -387,7 +344,6 @@ export function AdmissionHealthScreeningWizard({
    * if a previous save recorded it.
    */
   async function saveObservationSet(
-    bundle: ScreeningBundle,
     subject: Reference<Patient>,
     fields: { code: string; value?: Partial<Observation> }[]
   ): Promise<void> {
@@ -397,7 +353,7 @@ export function AdmissionHealthScreeningWizard({
         continue;
       }
       liveKeys.add(field.code);
-      obs(bundle, subject, { code: { text: field.code }, ...field.value });
+      await obs(subject, { code: { text: field.code }, ...field.value });
     }
     const owned = new Set(fields.map((f) => f.code));
     await retractStale('Observation', subject, (k) => owned.has(k), liveKeys);
@@ -454,10 +410,11 @@ export function AdmissionHealthScreeningWizard({
     return createReference(patient?.id ? (patient as WithId<Patient>) : await savePatientRecord());
   }
 
-  async function saveDemographics(bundle: ScreeningBundle, subject: Reference<Patient>): Promise<void> {
+  async function saveDemographics(): Promise<void> {
+    const subject = createReference(await savePatientRecord());
     const initials = form.text('mandated-reporter-initials');
 
-    await saveObservationSet(bundle, subject, [
+    await saveObservationSet(subject, [
       { code: 'Hair color', value: form.text('hair-color') ? { valueString: form.text('hair-color') } : undefined },
       { code: 'Eye color', value: form.text('eye-color') ? { valueString: form.text('eye-color') } : undefined },
       {
@@ -474,7 +431,7 @@ export function AdmissionHealthScreeningWizard({
     ]);
   }
 
-  async function saveVitals(bundle: ScreeningBundle, subject: Reference<Patient>) {
+  async function saveVitals(subject: Reference<Patient>) {
     const visionFields: [string, string][] = [
       ['vision-nocorr-left', 'Visual acuity, left eye, without correction'],
       ['vision-nocorr-right', 'Visual acuity, right eye, without correction'],
@@ -484,7 +441,7 @@ export function AdmissionHealthScreeningWizard({
       ['vision-corr-both', 'Visual acuity, both eyes, with correction'],
     ];
 
-    await saveObservationSet(bundle, subject, [
+    await saveObservationSet(subject, [
       { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp), unit: '°F' } } : undefined },
       { code: 'Heart rate', value: pulse ? { valueQuantity: { value: Number(pulse), unit: '/min' } } : undefined },
       { code: 'Respiratory rate', value: resp ? { valueQuantity: { value: Number(resp), unit: '/min' } } : undefined },
@@ -546,8 +503,7 @@ export function AdmissionHealthScreeningWizard({
       // value or children"), so a medication logged without a dose would be
       // rejected outright.
       const dosageText = [dosage, frequency].filter(Boolean).join(', ');
-      bundleUpsert(
-        bundle,
+      await medplum.upsertResource(
         {
           resourceType: 'MedicationStatement',
           status: 'active',
@@ -558,7 +514,7 @@ export function AdmissionHealthScreeningWizard({
           reasonCode: reason ? [{ text: reason }] : undefined,
           informationSource: prescriber ? { display: prescriber } : undefined,
           note: lastTaken ? [{ text: `Last taken: ${lastTaken}` }] : undefined,
-        } as Record<string, unknown>,
+        } as any,
         upsertQuery(key, subject)
       );
     }
@@ -574,14 +530,13 @@ export function AdmissionHealthScreeningWizard({
   // ---- Save handlers: Sections 3–4 ----
 
   /** Current Health Status (allergies card): allergies -> AllergyIntolerance, chronic conditions -> Condition */
-  async function saveAllergiesChronic(bundle: ScreeningBundle, subject: Reference<Patient>) {
+  async function saveAllergiesChronic(subject: Reference<Patient>) {
     const allergyKeys = new Set<string>();
     for (const item of form.checkedItems('allergy')) {
       if (item === 'No known allergies') continue;
       const key = `allergy::${item}`;
       allergyKeys.add(key);
-      bundleUpsert(
-        bundle,
+      await medplum.upsertResource(
         {
           resourceType: 'AllergyIntolerance',
           patient: subject,
@@ -590,7 +545,7 @@ export function AdmissionHealthScreeningWizard({
           clinicalStatus: ACTIVE_ALLERGY_STATUS,
           code: { text: form.checkTextMap('allergy')[item] || item },
           reaction: form.text('allergy-reaction') ? [{ description: form.text('allergy-reaction') }] : undefined,
-        } as Record<string, unknown>,
+        } as any,
         // AllergyIntolerance has no `subject` search param — it's `patient`.
         upsertQuery(key, subject, 'patient')
       );
@@ -602,15 +557,14 @@ export function AdmissionHealthScreeningWizard({
       for (const item of form.checkedItems('chronic-list')) {
         const key = `chronic::${item}`;
         chronicKeys.add(key);
-        bundleUpsert(
-          bundle,
+        await medplum.upsertResource(
           {
             resourceType: 'Condition',
             subject,
             identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
             clinicalStatus: ACTIVE_CONDITION_STATUS,
             code: { text: form.checkTextMap('chronic-list')[item] || item },
-          } as Record<string, unknown>,
+          } as any,
           upsertQuery(key, subject)
         );
       }
@@ -623,7 +577,7 @@ export function AdmissionHealthScreeningWizard({
     // derives its retraction scope from these codes, so clearing any one later
     // withdraws its Observation rather than leaving a stale value.
     const epipen = form.chip('epipen');
-    await saveObservationSet(bundle, subject, [
+    await saveObservationSet(subject, [
       {
         code: 'Epi-Pen prescribed or previously used',
         value: epipen
@@ -652,18 +606,18 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /** Current Health Status (appearance card): appearance/mental-status findings -> Observation */
-  async function saveMentalStatus(bundle: ScreeningBundle, subject: Reference<Patient>) {
+  async function saveMentalStatus(subject: Reference<Patient>) {
     const APPEARANCE_CODE = 'Appearance/mental status finding';
     const liveKeys = new Set<string>();
     for (const item of form.checkedItems('appearance')) {
       liveKeys.add(`${APPEARANCE_CODE}::${item}`);
-      obs(bundle, subject, { code: { text: APPEARANCE_CODE }, valueString: item }, item);
+      await obs(subject, { code: { text: APPEARANCE_CODE }, valueString: item }, item);
     }
     await retractStale('Observation', subject, (k) => k.startsWith(`${APPEARANCE_CODE}::`), liveKeys);
   }
 
   /** Section 3 (Review of Systems): every checked ROS/injury item -> Observation, tagged with its system */
-  async function saveReviewOfSystems(bundle: ScreeningBundle, subject: Reference<Patient>) {
+  async function saveReviewOfSystems(subject: Reference<Patient>) {
     const systems: [string, string][] = [
       ['injuries', 'Injuries/trauma'],
       ['firearm-safety', 'Injury prevention'],
@@ -684,27 +638,27 @@ export function AdmissionHealthScreeningWizard({
         if (item.startsWith('No problems') || item.startsWith('No significant')) continue;
         const code = `Review of systems: ${label}`;
         liveKeys.add(`${code}::${item}`);
-        obs(bundle, subject, { code: { text: code }, valueString: form.checkTextMap(grid)[item] || item }, item);
+        await obs(subject, { code: { text: code }, valueString: form.checkTextMap(grid)[item] || item }, item);
       }
     }
     if (form.text('last-dental-exam')) {
       liveKeys.add(DENTAL_EXAM);
-      obs(bundle, subject, { code: { text: DENTAL_EXAM }, valueString: form.text('last-dental-exam') });
+      await obs(subject, { code: { text: DENTAL_EXAM }, valueString: form.text('last-dental-exam') });
     }
     if (form.text('vision-exam-date') || form.text('vision-provider')) {
       liveKeys.add(VISION_EXAM);
-      obs(bundle, subject, {
+      await obs(subject, {
         code: { text: VISION_EXAM },
         valueString: `Date: ${form.text('vision-exam-date') || '—'}, provider: ${form.text('vision-provider') || '—'}`,
       });
     }
     if (form.text('ros-comments')) {
       liveKeys.add(ROS_COMMENTS);
-      obs(bundle, subject, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
+      await obs(subject, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
     }
     if (form.text('injuries-detail')) {
       liveKeys.add(INJURIES_DETAIL);
-      obs(bundle, subject, { code: { text: INJURIES_DETAIL }, valueString: form.text('injuries-detail') });
+      await obs(subject, { code: { text: INJURIES_DETAIL }, valueString: form.text('injuries-detail') });
     }
 
     // Scope covers both the checklist rows (which carry a `::item` suffix) and
@@ -719,7 +673,7 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /** Section 4 (Diagnosis & Disposition): nursing diagnoses -> Condition, plan items -> CarePlan note, sign-off -> Observation w/ note */
-  async function saveDiagnosisDisposition(bundle: ScreeningBundle, subject: Reference<Patient>) {
+  async function saveDiagnosisDisposition(subject: Reference<Patient>) {
     const diagnosisKeys = new Set<string>();
     for (const field of ['dx1', 'dx2', 'dx3', 'dx4']) {
       const val = form.text(field);
@@ -729,8 +683,7 @@ export function AdmissionHealthScreeningWizard({
         // second Condition alongside it.
         const key = `nursing-diagnosis::${field}`;
         diagnosisKeys.add(key);
-        bundleUpsert(
-          bundle,
+        await medplum.upsertResource(
           {
             resourceType: 'Condition',
             subject,
@@ -740,7 +693,7 @@ export function AdmissionHealthScreeningWizard({
             clinicalStatus: ACTIVE_CONDITION_STATUS,
             category: [{ text: 'Nursing diagnosis' }],
             code: { text: val },
-          } as Record<string, unknown>,
+          } as any,
           upsertQuery(key, subject)
         );
       }
@@ -748,8 +701,7 @@ export function AdmissionHealthScreeningWizard({
     const planItems = form.checkedItems('nursing-plan');
     if (planItems.length > 0) {
       const key = 'nursing-plan';
-      bundleUpsert(
-        bundle,
+      await medplum.upsertResource(
         {
           resourceType: 'CarePlan',
           status: 'active',
@@ -757,11 +709,11 @@ export function AdmissionHealthScreeningWizard({
           subject,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           description: planItems.join('; '),
-        } as Record<string, unknown>,
+        } as any,
         upsertQuery(key, subject)
       );
     }
-    obs(bundle, subject, {
+    await obs(subject, {
       code: { text: 'Admission health screening sign-off' },
       valueString: `Nurse: ${form.text('nurse-signature') || '—'}; Physician: ${form.text('physician-signature') || '—'}`,
       note: form.text('health-alerts') ? [{ text: form.text('health-alerts') }] : undefined,
@@ -848,14 +800,7 @@ export function AdmissionHealthScreeningWizard({
                   type="button"
                   className="djs-btn"
                   disabled={savingSection === 'demographics'}
-                  onClick={() =>
-                    runSave('demographics', 'Demographics saved', async () => {
-                      const bundle = newBundle();
-                      const subject = createReference(await savePatientRecord());
-                      await saveDemographics(bundle, subject);
-                      await commitBundle(bundle);
-                    })
-                  }
+                  onClick={() => runSave('demographics', 'Demographics saved', saveDemographics)}
                 >
                   {savingSection === 'demographics' ? 'Saving…' : 'Save demographics'}
                 </button>
@@ -980,12 +925,10 @@ export function AdmissionHealthScreeningWizard({
                   disabled={savingSection === 'health-status'}
                   onClick={() =>
                     runSave('health-status', 'Health status saved', async () => {
-                      const bundle = newBundle();
                       const subject = await ensurePatientRef();
-                      await saveVitals(bundle, subject);
-                      await saveAllergiesChronic(bundle, subject);
-                      await saveMentalStatus(bundle, subject);
-                      await commitBundle(bundle);
+                      await saveVitals(subject);
+                      await saveAllergiesChronic(subject);
+                      await saveMentalStatus(subject);
                     })
                   }
                 >
@@ -1036,11 +979,7 @@ export function AdmissionHealthScreeningWizard({
                   className="djs-btn"
                   disabled={savingSection === 'ros'}
                   onClick={() =>
-                    runSave('ros', 'Review of systems saved', async () => {
-                      const bundle = newBundle();
-                      await saveReviewOfSystems(bundle, await ensurePatientRef());
-                      await commitBundle(bundle);
-                    })
+                    runSave('ros', 'Review of systems saved', async () => saveReviewOfSystems(await ensurePatientRef()))
                   }
                 >
                   {savingSection === 'ros' ? 'Saving…' : 'Save review of systems'}
@@ -1078,11 +1017,9 @@ export function AdmissionHealthScreeningWizard({
                   className="djs-btn"
                   disabled={savingSection === 'disposition'}
                   onClick={() =>
-                    runSave('disposition', 'Diagnosis & disposition saved', async () => {
-                      const bundle = newBundle();
-                      await saveDiagnosisDisposition(bundle, await ensurePatientRef());
-                      await commitBundle(bundle);
-                    })
+                    runSave('disposition', 'Diagnosis & disposition saved', async () =>
+                      saveDiagnosisDisposition(await ensurePatientRef())
+                    )
                   }
                 >
                   {savingSection === 'disposition' ? 'Saving…' : 'Save diagnosis & disposition'}
