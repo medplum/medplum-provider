@@ -13,6 +13,9 @@ import {
   loadScreeningResources,
   parseDoseQuantity,
   SCREENING_ID_SYSTEM,
+  VITAL_SIGN_DEFS,
+  VITAL_SIGNS_CATEGORY,
+  vitalQuantity,
 } from './screeningData';
 
 function screeningId(value: string): { system: string; value: string }[] {
@@ -145,6 +148,63 @@ describe('loadScreeningResources', () => {
     expect(data.medications).toEqual([]);
     expect(data.carePlans).toEqual([]);
     expect(data.byKey.size).toBe(0);
+  });
+});
+
+describe('vitalQuantity / VITAL_SIGN_DEFS (task 26)', () => {
+  test('attaches the UCUM system and code, keeping the display unit', () => {
+    expect(vitalQuantity('Body temperature', 98.6)).toEqual({
+      value: 98.6,
+      unit: '°F',
+      system: 'http://unitsofmeasure.org',
+      code: '[degF]',
+    });
+    expect(vitalQuantity('Body weight', 150)).toEqual({
+      value: 150,
+      unit: 'lb',
+      system: 'http://unitsofmeasure.org',
+      code: '[lb_av]',
+    });
+    expect(vitalQuantity('Body height', 68)).toEqual({
+      value: 68,
+      unit: 'in',
+      system: 'http://unitsofmeasure.org',
+      code: '[in_i]',
+    });
+  });
+
+  test('leaves a non-vital code as a bare value rather than inventing a unit', () => {
+    expect(vitalQuantity('Chief complaint', 3)).toEqual({ value: 3 });
+  });
+
+  // The imperial units this form collects must be in the sets the FHIR
+  // vital-signs profile permits, or the codes are wrong even though they look
+  // plausible. Verified against hl7.org/fhir/R4/observation-vitalsigns.html.
+  test('every vital carries a LOINC code, and every measured one a UCUM code', () => {
+    const expected: Record<string, { loinc: string; ucum?: string }> = {
+      'Body temperature': { loinc: '8310-5', ucum: '[degF]' },
+      'Heart rate': { loinc: '8867-4', ucum: '/min' },
+      'Respiratory rate': { loinc: '9279-1', ucum: '/min' },
+      'Body weight': { loinc: '29463-7', ucum: '[lb_av]' },
+      'Body height': { loinc: '8302-2', ucum: '[in_i]' },
+      'Body mass index (BMI)': { loinc: '39156-5', ucum: 'kg/m2' },
+      // The panel's reading lives in its components, so it has no unit itself.
+      'Blood pressure': { loinc: '85354-9', ucum: undefined },
+    };
+    for (const [code, want] of Object.entries(expected)) {
+      expect(VITAL_SIGN_DEFS[code]?.loinc, `LOINC for ${code}`).toBe(want.loinc);
+      expect(VITAL_SIGN_DEFS[code]?.ucum, `UCUM for ${code}`).toBe(want.ucum);
+    }
+    // Guards against a vital being added to the table without test coverage.
+    expect(Object.keys(VITAL_SIGN_DEFS).sort()).toEqual(Object.keys(expected).sort());
+  });
+
+  test('the vital-signs category uses the standard observation-category system', () => {
+    expect(VITAL_SIGNS_CATEGORY.coding?.[0]).toEqual({
+      system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+      code: 'vital-signs',
+      display: 'Vital Signs',
+    });
   });
 });
 

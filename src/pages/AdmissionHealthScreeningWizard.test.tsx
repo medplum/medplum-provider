@@ -604,6 +604,133 @@ describe('AdmissionHealthScreeningWizard', () => {
     });
   });
 
+  describe('vital-signs coding (task 26)', () => {
+    /** Saves one of each vital and returns the written Observations by code.text. */
+    async function saveVitalsAndCapture(): Promise<{ capture: WriteCapture; byCode: Map<string, Observation> }> {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      await user.type(fieldInput('Temp (°F)'), '98.6');
+      await user.type(fieldInput('Pulse'), '72');
+      await user.type(fieldInput('Resp'), '16');
+      await user.type(screen.getByLabelText('Systolic'), '118');
+      await user.type(screen.getByLabelText('Diastolic'), '76');
+      await user.type(fieldInput('Weight (lb)'), '150');
+      await user.type(fieldInput('Height (in)'), '68');
+      // Chief complaint gives us a non-vital Observation from the same save,
+      // to prove the enrichment is scoped rather than blanket.
+      await user.click(screen.getByRole('button', { name: /yes — has a complaint/i }));
+      await user.type(fieldTextarea('Specify'), 'Sore throat');
+      await saveSection(user, /save health status/i);
+
+      const byCode = new Map<string, Observation>();
+      for (const r of capture.written) {
+        if (r.resourceType === 'Observation') {
+          const text = (r as Observation).code?.text;
+          if (text) {
+            byCode.set(text, r as Observation);
+          }
+        }
+      }
+      return { capture, byCode };
+    }
+
+    test('every vital is written with its LOINC code, vital-signs category, and UCUM unit', async () => {
+      const { capture, byCode } = await saveVitalsAndCapture();
+
+      const expected: Record<string, { loinc: string; ucum?: string; value?: number }> = {
+        'Body temperature': { loinc: '8310-5', ucum: '[degF]', value: 98.6 },
+        'Heart rate': { loinc: '8867-4', ucum: '/min', value: 72 },
+        'Respiratory rate': { loinc: '9279-1', ucum: '/min', value: 16 },
+        'Body weight': { loinc: '29463-7', ucum: '[lb_av]', value: 150 },
+        'Body height': { loinc: '8302-2', ucum: '[in_i]', value: 68 },
+        'Body mass index (BMI)': { loinc: '39156-5', ucum: 'kg/m2' },
+        // BP's reading is in components, so it has no top-level quantity —
+        // but it must still be coded and categorized like any other vital.
+        'Blood pressure': { loinc: '85354-9' },
+      };
+
+      for (const [code, want] of Object.entries(expected)) {
+        const obs = byCode.get(code);
+        expect(obs, `expected an Observation for "${code}"`).toBeDefined();
+        expect(obs?.code?.coding?.[0].code, `LOINC for ${code}`).toBe(want.loinc);
+        expect(obs?.code?.coding?.[0].system).toBe('http://loinc.org');
+        expect(obs?.category?.[0].coding?.[0].code, `category for ${code}`).toBe('vital-signs');
+        if (want.ucum) {
+          expect(obs?.valueQuantity?.code, `UCUM for ${code}`).toBe(want.ucum);
+          expect(obs?.valueQuantity?.system).toBe('http://unitsofmeasure.org');
+        }
+        if (want.value !== undefined) {
+          expect(obs?.valueQuantity?.value, `value for ${code}`).toBe(want.value);
+        }
+      }
+
+      expect(capture.validationErrors).toEqual([]);
+    });
+
+    test('the coding is scoped to vitals and does not leak onto other observations', async () => {
+      const { byCode } = await saveVitalsAndCapture();
+
+      const complaint = byCode.get('Chief complaint');
+      expect(complaint).toBeDefined();
+      expect(complaint?.category).toBeUndefined();
+      expect(complaint?.code?.coding).toBeUndefined();
+      expect(complaint?.valueString).toBe('Sore throat');
+    });
+
+    // code.text is what screening identifiers derive from, so adding codings
+    // must not have disturbed it — a changed text would orphan every reading
+    // saved before this change rather than upgrading it.
+    // The vital-signs profile requires a time of measurement, so tagging these
+    // with the category obliges us to record one.
+    test('every vital records when the measurement was taken', async () => {
+      const { byCode } = await saveVitalsAndCapture();
+
+      for (const code of ['Body temperature', 'Heart rate', 'Blood pressure', 'Body weight']) {
+        expect(byCode.get(code)?.effectiveDateTime, `effectiveDateTime for ${code}`).toBeDefined();
+      }
+    });
+
+    // Resuming a partially-completed screening is this wizard's whole point, so
+    // a nurse reopening it later to fix a typo must not silently re-date
+    // yesterday's vitals to today.
+    test('re-saving preserves the original measurement time rather than restamping it', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      await user.type(fieldInput('Temp (°F)'), '98.6');
+      await saveSection(user, /save health status/i);
+
+      const query = { identifier: `${SCREENING_ID_SYSTEM}|Body temperature` };
+      const [first] = await medplum.searchResources('Observation', query);
+      const firstEffective = first.effectiveDateTime;
+      expect(firstEffective).toBeDefined();
+
+      // Edit a different field and save again — the temperature reading was
+      // not retaken, so its time must not move.
+      await user.type(fieldInput('Pulse'), '72');
+      await saveSection(user, /save health status/i);
+
+      const [second] = await medplum.searchResources('Observation', query);
+      expect(second.id).toBe(first.id);
+      expect(second.effectiveDateTime).toBe(firstEffective);
+    });
+
+    test('code.text is preserved so existing identifiers still resolve', async () => {
+      const { byCode } = await saveVitalsAndCapture();
+
+      expect(byCode.get('Body temperature')?.code?.text).toBe('Body temperature');
+      expect(byCode.get('Body temperature')?.identifier?.[0].value).toBe('Body temperature');
+    });
+  });
+
   describe('blood pressure panel (task 25)', () => {
     test('saves systolic and diastolic as coded components, with no value string', async () => {
       const medplum = new MockClient();

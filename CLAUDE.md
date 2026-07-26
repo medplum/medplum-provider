@@ -231,6 +231,22 @@ targeted test for anything you add.
 failed save looks identical to a successful one. Always route through
 `runSave`.
 
+**Claiming a profile you don't satisfy.** Tagging a resource with a
+profile's marker — `category: vital-signs`, a `us-core-*` extension URL —
+takes on that profile's required elements. The vital-signs profile mandates
+a time of measurement, which the wizard's vitals didn't set (fixed in task
+26); the `us-core-race`/`us-core-ethnicity` extensions are complex
+extensions we currently write as a flat `valueCodeableConcept` (still open,
+task 33). Both look conformant and aren't. If you add a profile marker,
+read that profile's mandatory elements first.
+
+**Restamping a timestamp that records when something happened.** This
+wizard is built to resume a partly-finished screening, so a save is often
+an *edit*, not a new measurement. `effectiveDateTime` on vitals is
+therefore preserved across re-saves rather than set to `now()` each time —
+otherwise reopening a screening the next day silently re-dates yesterday's
+vitals. Any new "when did this happen" field needs the same treatment.
+
 **A default that's also a valid answer.** E.g. a 0–10 scale defaulting to
 `0` can't be told apart from a real "0" answer. Use `undefined` for "not
 answered" and a coded `dataAbsentReason` (or equivalent) on save, never a

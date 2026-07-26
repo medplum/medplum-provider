@@ -4,6 +4,7 @@ import type { MedplumClient, WithId } from '@medplum/core';
 import type {
   AllergyIntolerance,
   CarePlan,
+  CodeableConcept,
   Condition,
   Dosage,
   Encounter,
@@ -54,21 +55,19 @@ export function screeningKey(res: Resource): string | undefined {
 }
 
 /**
- * Blood pressure is modeled as FHIR's standard two-component panel rather than
- * a "120/80" string. Codes verified against the FHIR R4 blood-pressure profile
- * (hl7.org/fhir/R4/bp.html), which fixes all three.
+ * The BP panel's `code.text`.
  *
- * A BP string can't be trended, alerted on, or compared — and a pediatric BP
- * percentile check, which this population actually needs, is impossible
- * against text. The panel's own `code.text` stays `'Blood pressure'`: screening
- * identifiers derive from it, so changing it would orphan every previously
- * saved reading.
- */
-/**
- * The BP panel's `code.text`. Exported so the wizard, read-back, and the
- * summary display share one definition — the save/read/display paths all
- * depend on the same components now, so a drifted string here would strand a
- * reading in three places at once.
+ * Blood pressure is modeled as FHIR's standard two-component panel rather than
+ * a "120/80" string — a string can't be trended, alerted on, or compared, and
+ * a pediatric BP percentile check, which this population actually needs, is
+ * impossible against text. Codes verified against the FHIR R4 blood-pressure
+ * profile (hl7.org/fhir/R4/bp.html), which fixes all three.
+ *
+ * Exported so the wizard, read-back, and the summary display share one
+ * definition — all three depend on the same components now, so a drifted
+ * string here would strand a reading in three places at once. The value stays
+ * `'Blood pressure'`: screening identifiers derive from it, so changing it
+ * would orphan every previously saved reading.
  */
 export const BLOOD_PRESSURE_CODE = 'Blood pressure';
 
@@ -76,6 +75,67 @@ const UCUM_SYSTEM = 'http://unitsofmeasure.org';
 const LOINC_SYSTEM = 'http://loinc.org';
 const BP_SYSTOLIC_LOINC = '8480-6';
 const BP_DIASTOLIC_LOINC = '8462-4';
+
+/**
+ * US Core makes the vital-signs profile mandatory, and it requires this
+ * category on every vital-sign Observation. Nothing in the wizard set
+ * `Observation.category` at all before task 26.
+ */
+export const VITAL_SIGNS_CATEGORY: CodeableConcept = {
+  coding: [
+    {
+      system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+      code: 'vital-signs',
+      display: 'Vital Signs',
+    },
+  ],
+  text: 'Vital Signs',
+};
+
+export interface VitalSignDef {
+  loinc: string;
+  display: string;
+  /** Human-readable unit for display. Omitted for BP, whose value lives in components. */
+  unit?: string;
+  /** UCUM code — the machine-readable unit that makes the number comparable. */
+  ucum?: string;
+}
+
+/**
+ * `code.text` → its LOINC code and units, for every vital the form captures.
+ *
+ * Codes and permitted units verified against the FHIR R4 vital-signs profile
+ * (hl7.org/fhir/R4/observation-vitalsigns.html), not recalled — the profile
+ * lists the LOINC "magic values" implementations must use, and the UCUM units
+ * each one allows. The imperial units this form collects are all in those
+ * allowed sets: `[degF]` for temperature, `[lb_av]` for weight, `[in_i]` for
+ * height.
+ *
+ * **The keys are the existing `code.text` strings and must not change** —
+ * screening identifiers derive from them, so editing one would orphan every
+ * previously saved reading of that vital rather than upgrading it.
+ *
+ * This table is the single source of truth for a vital's unit: `obs()` applies
+ * it, so call sites pass only the number. Two places naming the same unit is
+ * how they drift.
+ */
+export const VITAL_SIGN_DEFS: Record<string, VitalSignDef> = {
+  'Body temperature': { loinc: '8310-5', display: 'Body temperature', unit: '°F', ucum: '[degF]' },
+  'Heart rate': { loinc: '8867-4', display: 'Heart rate', unit: '/min', ucum: '/min' },
+  'Respiratory rate': { loinc: '9279-1', display: 'Respiratory rate', unit: '/min', ucum: '/min' },
+  'Body weight': { loinc: '29463-7', display: 'Body weight', unit: 'lb', ucum: '[lb_av]' },
+  'Body height': { loinc: '8302-2', display: 'Body height', unit: 'in', ucum: '[in_i]' },
+  'Body mass index (BMI)': { loinc: '39156-5', display: 'Body mass index (BMI)', unit: 'kg/m2', ucum: 'kg/m2' },
+  // The panel code. Its reading lives in `component`, so it has no unit of its
+  // own — the components carry mm[Hg] themselves.
+  'Blood pressure': { loinc: '85354-9', display: 'Blood pressure panel' },
+};
+
+/** The UCUM-coded Quantity for a vital, given its raw number. */
+export function vitalQuantity(codeText: string, value: number): Quantity {
+  const def = VITAL_SIGN_DEFS[codeText];
+  return def?.ucum ? { value, unit: def.unit, system: UCUM_SYSTEM, code: def.ucum } : { value };
+}
 
 function bpComponent(loinc: string, display: string, value: number): ObservationComponent {
   return {

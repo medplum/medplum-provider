@@ -29,6 +29,10 @@ import {
   isScreeningRetracted,
   loadScreeningResources,
   SCREENING_ID_SYSTEM,
+  screeningKey,
+  VITAL_SIGN_DEFS,
+  VITAL_SIGNS_CATEGORY,
+  vitalQuantity,
 } from './screeningData';
 import { DJS_FACILITIES, DJS_FACILITY_SYSTEM, facilityByCode } from './djsFacilities';
 import { hydrateScreeningForm } from './hydrateScreening';
@@ -282,6 +286,13 @@ export function AdmissionHealthScreeningWizard({
   ): Promise<void> {
     const codeText = partial.code?.text ?? 'Unspecified screening finding';
     const key = itemKey ? `${codeText}::${itemKey}` : codeText;
+    // Vital signs are enriched here, at the single chokepoint every
+    // Observation passes through, rather than at each call site — US Core
+    // requires a LOINC code and `category: vital-signs` on all of them, and a
+    // per-field approach is one someone can forget half of. Applied after the
+    // spread so it wins over whatever the caller passed. `code.text` itself is
+    // preserved, since identifiers derive from it.
+    const vital = VITAL_SIGN_DEFS[codeText];
     await medplum.upsertResource<Observation>(
       {
         resourceType: 'Observation',
@@ -290,6 +301,21 @@ export function AdmissionHealthScreeningWizard({
         encounter: encounterRef,
         identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
         ...partial,
+        ...(vital
+          ? {
+              code: {
+                ...partial.code,
+                coding: [{ system: 'http://loinc.org', code: vital.loinc, display: vital.display }],
+              },
+              category: [VITAL_SIGNS_CATEGORY],
+              // The unit lives in VITAL_SIGN_DEFS, not at the call site, so
+              // there's one source of truth for it. BP has no top-level
+              // quantity (its reading is in `component`), hence the guard.
+              ...(partial.valueQuantity?.value !== undefined
+                ? { valueQuantity: vitalQuantity(codeText, partial.valueQuantity.value) }
+                : {}),
+            }
+          : {}),
       } as Observation,
       upsertQuery(key, subject)
     );
@@ -392,13 +418,49 @@ export function AdmissionHealthScreeningWizard({
     subject: Reference<Patient>,
     fields: { code: string; value?: Partial<Observation> }[]
   ): Promise<void> {
+    // Vital signs must record WHEN the measurement was taken — the FHIR
+    // vital-signs profile requires it, and by tagging these
+    // `category: vital-signs` we're claiming that profile, so omitting it
+    // would mean asserting conformance we don't meet.
+    //
+    // The existing time is preserved rather than restamped with now() on every
+    // save. This wizard is explicitly built to resume a partially-completed
+    // screening, so a nurse reopening it the next day to fix a typo must not
+    // silently re-date yesterday's vitals to today — that would be a
+    // clinically misleading record, not just untidy. Only a first write stamps
+    // the clock.
+    //
+    // The form has no separate "time vitals taken" input, so this is the
+    // recording time standing in for the measurement time. Fine for a
+    // screening completed in one sitting; noted in TASKS.md as the reason a
+    // real measurement-time field may be wanted later.
+    const hasVital = fields.some((f) => f.value && VITAL_SIGN_DEFS[f.code]);
+    const priorEffective = new Map<string, string>();
+    if (hasVital) {
+      const existing = await medplum.searchResources('Observation', {
+        subject: subject.reference as string,
+        _count: 200,
+      });
+      for (const res of existing) {
+        const key = screeningKey(res);
+        if (key && res.effectiveDateTime) {
+          priorEffective.set(key, res.effectiveDateTime);
+        }
+      }
+    }
+    const now = new Date().toISOString();
+
     const liveKeys = new Set<string>();
     for (const field of fields) {
       if (!field.value) {
         continue;
       }
       liveKeys.add(field.code);
-      await obs(subject, { code: { text: field.code }, ...field.value });
+      await obs(subject, {
+        code: { text: field.code },
+        ...(VITAL_SIGN_DEFS[field.code] ? { effectiveDateTime: priorEffective.get(field.code) ?? now } : {}),
+        ...field.value,
+      });
     }
     const owned = new Set(fields.map((f) => f.code));
     await retractStale('Observation', subject, (k) => owned.has(k), liveKeys);
@@ -565,9 +627,11 @@ export function AdmissionHealthScreeningWizard({
     ];
 
     await saveObservationSet(subject, [
-      { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp), unit: '°F' } } : undefined },
-      { code: 'Heart rate', value: pulse ? { valueQuantity: { value: Number(pulse), unit: '/min' } } : undefined },
-      { code: 'Respiratory rate', value: resp ? { valueQuantity: { value: Number(resp), unit: '/min' } } : undefined },
+      // Units are not repeated here: `obs()` applies each vital's unit and
+      // UCUM code from VITAL_SIGN_DEFS, so the unit has one home.
+      { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp) } } : undefined },
+      { code: 'Heart rate', value: pulse ? { valueQuantity: { value: Number(pulse) } } : undefined },
+      { code: 'Respiratory rate', value: resp ? { valueQuantity: { value: Number(resp) } } : undefined },
       {
         // A BP panel carries its reading in `component`, with no top-level
         // value[x] — the two numbers are separate observations of separate
@@ -575,11 +639,11 @@ export function AdmissionHealthScreeningWizard({
         code: BLOOD_PRESSURE_CODE,
         value: bpComponents ? { component: bpComponents } : undefined,
       },
-      { code: 'Body weight', value: weight ? { valueQuantity: { value: Number(weight), unit: 'lb' } } : undefined },
-      { code: 'Body height', value: height ? { valueQuantity: { value: Number(height), unit: 'in' } } : undefined },
+      { code: 'Body weight', value: weight ? { valueQuantity: { value: Number(weight) } } : undefined },
+      { code: 'Body height', value: height ? { valueQuantity: { value: Number(height) } } : undefined },
       {
         code: 'Body mass index (BMI)',
-        value: bmi !== null ? { valueQuantity: { value: Number(bmi.toFixed(1)), unit: 'kg/m2' } } : undefined,
+        value: bmi !== null ? { valueQuantity: { value: Number(bmi.toFixed(1)) } } : undefined,
       },
       ...visionFields.map(([key, label]) => ({
         code: label,

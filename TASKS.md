@@ -343,13 +343,40 @@ instead of importing them. Worth preserving that property.
 
 ### Tier 2 — standards work, each contained
 
-- **Task 26 — LOINC + `category: vital-signs` + UCUM on the *remaining*
-  vitals.** US Core makes the vital-signs profile mandatory. BP was already
-  done by task 25 (its components require codes, so it couldn't be
-  deferred); temp/pulse/resp/weight/height/BMI still need theirs, and
-  **`category: vital-signs` is still missing on every vital including BP**.
-  Keep `code.text` unchanged: identifiers derive from it, so editing it
-  would orphan every previously saved Observation.
+- **Task 26 — LOINC + `category: vital-signs` + UCUM on vitals. — DONE.**
+  All seven vitals now carry a LOINC code, the vital-signs category, and a
+  UCUM-coded unit. Codes and permitted units verified against
+  hl7.org/fhir/R4/observation-vitalsigns.html, not recalled; the imperial
+  units this form collects are all in the profile's allowed sets
+  (`[degF]`, `[lb_av]`, `[in_i]`).
+
+  **Adding the category surfaced a conformance obligation worth
+  remembering: tagging an Observation `vital-signs` claims the profile, and
+  the profile mandates a time of measurement.** Our vitals set no
+  `effective[x]` at all, so shipping the category alone would have asserted
+  conformance we didn't meet — the same class of error as the US Core race
+  extension in task 33. Fixed in the same change.
+
+  `effectiveDateTime` is **preserved across re-saves, not restamped**. This
+  wizard exists to resume a partially-completed screening, so a nurse
+  reopening it the next day to fix a typo must not silently re-date
+  yesterday's vitals to today — that's a clinically misleading record, not
+  just untidy. Only a first write stamps the clock; `saveObservationSet`
+  looks up prior times once, and only when the set actually contains a
+  vital. Mutation-verified (always-restamp fails the test).
+
+  There is **no separate "time vitals taken" input**, so this is the
+  recording time standing in for the measurement time — fine for a
+  screening done in one sitting, but a real measurement-time field may be
+  wanted if that assumption ever stops holding.
+
+  Two structural choices to preserve: the enrichment happens in `obs()`,
+  the single chokepoint every Observation passes through, so no vital can
+  be missed and non-vitals are provably unaffected (there's a test for the
+  leak). And `VITAL_SIGN_DEFS` is the **only** home for a vital's unit —
+  call sites pass just the number, because two places naming the same unit
+  is how they drift. `code.text` keys are unchanged, since identifiers
+  derive from them.
 - **Task 27 — assert "No known allergies" instead of discarding it.**
   Currently `continue`d, so "no allergies" is indistinguishable from
   "never asked" — meaningful in a screening.

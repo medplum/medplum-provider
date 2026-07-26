@@ -555,4 +555,64 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
     },
     90_000
   );
+
+  test(
+    'the real server accepts vitals carrying LOINC codes, the vital-signs category and UCUM units (task 26)',
+    async () => {
+      // Two things only a real server can answer. First, whether tagging these
+      // `category: vital-signs` triggers validation against the FHIR
+      // vital-signs profile — which mandates a time of measurement, a LOINC
+      // code and a UCUM unit. MockClient validates nothing, so an
+      // almost-conformant vital passes offline and is rejected here.
+      // Second, whether the codings and UCUM codes survive a round-trip rather
+      // than being silently dropped or rewritten.
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), family);
+      await saveSection(user, /save demographics/i);
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      await user.type(fieldInput('Temp (°F)'), '98.6');
+      await user.type(fieldInput('Weight (lb)'), '150');
+      await saveSection(user, /save health status/i);
+
+      const expected: Record<string, { loinc: string; ucum: string; value: number }> = {
+        'Body temperature': { loinc: '8310-5', ucum: '[degF]', value: 98.6 },
+        'Body weight': { loinc: '29463-7', ucum: '[lb_av]', value: 150 },
+      };
+
+      for (const [code, want] of Object.entries(expected)) {
+        const [vital] = await medplum.searchResources('Observation', {
+          subject: `Patient/${patient.id}`,
+          identifier: `${SCREENING_ID_SYSTEM}|${code}`,
+        });
+        expect(vital, `expected the server to have stored "${code}"`).toBeDefined();
+        expect(vital.code?.coding?.[0].code).toBe(want.loinc);
+        expect(vital.category?.[0].coding?.[0].code).toBe('vital-signs');
+        expect(vital.valueQuantity?.value).toBe(want.value);
+        expect(vital.valueQuantity?.code).toBe(want.ucum);
+        expect(vital.valueQuantity?.system).toBe('http://unitsofmeasure.org');
+        // Required by the vital-signs profile.
+        expect(vital.effectiveDateTime, `effectiveDateTime for ${code}`).toBeDefined();
+      }
+
+      // Re-saving must not re-date a measurement that wasn't retaken.
+      const tempQuery = {
+        subject: `Patient/${patient.id}`,
+        identifier: `${SCREENING_ID_SYSTEM}|Body temperature`,
+      };
+      const [before] = await medplum.searchResources('Observation', tempQuery);
+      await user.type(fieldInput('Pulse'), '72');
+      await saveSection(user, /save health status/i);
+      const [after] = await medplum.searchResources('Observation', tempQuery);
+      expect(after.id).toBe(before.id);
+      expect(after.effectiveDateTime).toBe(before.effectiveDateTime);
+    },
+    90_000
+  );
 });
