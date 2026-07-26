@@ -31,11 +31,13 @@ import type { WithId } from '@medplum/core';
 import { MedplumClient } from '@medplum/core';
 import type { Patient } from '@medplum/fhirtypes';
 import { MedplumProvider } from '@medplum/react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AdmissionHealthScreeningWizard } from './AdmissionHealthScreeningWizard';
+import { DJS_FACILITY_SYSTEM } from './djsFacilities';
+import { ADMISSION_ENCOUNTER_KEY } from './screeningData';
 
 // Duplicated from AdmissionHealthScreeningWizard.tsx (and from
 // AdmissionHealthScreeningWizard.test.tsx / .fieldIntegrity.test.ts) rather
@@ -79,6 +81,30 @@ async function renderWizard(medplum: MedplumClient): Promise<void> {
       </MantineProvider>
     );
   });
+}
+
+/** Mounts the wizard at an existing patient's route, so the read-back effect runs. */
+async function renderWizardForPatient(medplum: MedplumClient, patientId: string): Promise<void> {
+  await act(async () => {
+    render(
+      <MantineProvider>
+        <Notifications />
+        <MedplumProvider medplum={medplum}>
+          <MemoryRouter initialEntries={[`/admission-screening/${patientId}`]}>
+            <Routes>
+              <Route path="/admission-screening/:patientId" element={<AdmissionHealthScreeningWizard />} />
+            </Routes>
+          </MemoryRouter>
+        </MedplumProvider>
+      </MantineProvider>
+    );
+  });
+}
+
+/** Selects a facility in the closed-set Facility dropdown by its visible name. */
+async function selectFacility(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  const select = document.querySelector('select') as HTMLSelectElement;
+  await user.selectOptions(select, screen.getByRole('option', { name }));
 }
 
 /** Clicks a section's save button and waits for the save to settle (button re-enabled). */
@@ -126,6 +152,15 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
 
   let medplum: MedplumClient;
   const createdPatientIds: string[] = [];
+  /**
+   * Only throwaway test Locations (the rename test's `zz-live-test-*` code).
+   * The **canonical facility Locations are deliberately left behind** — they
+   * are shared reference data, exactly as in production, and leaving them
+   * means a repeat run exercises the reuse-an-existing-Location path rather
+   * than always creating fresh. The "converge on one Location" assertion holds
+   * either way, which is the point.
+   */
+  const createdLocationIds: string[] = [];
 
   beforeAll(async () => {
     medplum = new MedplumClient({ baseUrl: BASE_URL });
@@ -140,6 +175,13 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
     for (const id of createdPatientIds) {
       try {
         await medplum.deleteResource('Patient', id);
+      } catch {
+        // ignore — best-effort only, see comment above.
+      }
+    }
+    for (const id of createdLocationIds) {
+      try {
+        await medplum.deleteResource('Location', id);
       } catch {
         // ignore — best-effort only, see comment above.
       }
@@ -296,6 +338,171 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       expect(afterUncheck[0].id).toBe(afterCheck[0].id);
       const codesAfterUncheck = afterUncheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
       expect(codesAfterUncheck).toContain('entered-in-error');
+    },
+    60_000
+  );
+
+  // ---- Task 24: admission Encounter + facility Location ----
+  //
+  // What these prove that the MockClient suite cannot:
+  //
+  //  - The server ACCEPTS an Encounter at all. `status` and `class` are
+  //    required by FHIR and MockClient validates nothing, so the unit suite
+  //    would stay green even if `class` were malformed or ActCode `IMP` were
+  //    rejected. Only a real write proves it.
+  //  - The Location conditional upsert actually converges on THIS server.
+  //    The whole no-duplicate-facilities design rests on
+  //    `identifier=<system>|<code>` matching on a conditional PUT, and
+  //    MockClient's identifier-search semantics have already been caught
+  //    diverging from the server once (the bare `identifier=system|` case
+  //    documented in CLAUDE.md). If that diverges here, every admission mints
+  //    a fresh facility and nothing in the offline suite would notice.
+  //  - Read-back resolves a Location through a real `readResource`, which is
+  //    a code path `loadScreeningResources` only gained in task 24.
+
+  test(
+    'the real server accepts the admission Encounter and its facility Location',
+    async () => {
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), family);
+      fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-20' } });
+      await selectFacility(user, 'Cheltenham');
+      await saveSection(user, /save demographics/i);
+
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+
+      // Existence == the server accepted it, including the required
+      // status/class and the v3 ActCode `IMP` value.
+      const encounters = await medplum.searchResources('Encounter', {
+        subject: `Patient/${patient.id}`,
+        identifier: `${SCREENING_ID_SYSTEM}|${ADMISSION_ENCOUNTER_KEY}`,
+      });
+      expect(encounters).toHaveLength(1);
+      expect(encounters[0].period?.start).toBe('2026-07-20');
+      expect(encounters[0].class?.code).toBe('IMP');
+
+      // The facility is a real referenced Location, not a string on the
+      // Encounter — and the Encounter carries no cached copy of its name.
+      const locationRef = encounters[0].location?.[0].location?.reference;
+      expect(locationRef).toMatch(/^Location\//);
+      expect(encounters[0].location?.[0].location?.display).toBeUndefined();
+
+      const location = await medplum.readReference({ reference: locationRef as string });
+      expect(location.resourceType).toBe('Location');
+      expect((location as { name?: string }).name).toBe('Cheltenham');
+      expect((location as { identifier?: { system?: string; value?: string }[] }).identifier).toContainEqual({
+        system: DJS_FACILITY_SYSTEM,
+        value: 'cheltenham',
+      });
+
+      // Re-saving must update the admission in place, not open a second one.
+      await saveSection(user, /save demographics/i);
+      const afterResave = await medplum.searchResources('Encounter', {
+        subject: `Patient/${patient.id}`,
+        identifier: `${SCREENING_ID_SYSTEM}|${ADMISSION_ENCOUNTER_KEY}`,
+      });
+      expect(afterResave).toHaveLength(1);
+      expect(afterResave[0].id).toBe(encounters[0].id);
+    },
+    60_000
+  );
+
+  test(
+    'two patients admitted to the same facility converge on one Location',
+    async () => {
+      // The core duplication risk, and the one MockClient is least able to
+      // speak to. Note this assertion holds across repeated `npm run test:live`
+      // runs too: the canonical facility Locations are deliberately NOT cleaned
+      // up (see afterAll), so a later run exercises the reuse-existing path
+      // rather than the create path — and the count must still be exactly 1.
+      const facilityQuery = { identifier: `${DJS_FACILITY_SYSTEM}|hickey` };
+
+      for (const family of [uniqueFamily(), uniqueFamily()]) {
+        const user = userEvent.setup();
+        await renderWizard(medplum);
+        await user.type(fieldInput('Last name'), family);
+        await selectFacility(user, 'Hickey');
+        await saveSection(user, /save demographics/i);
+
+        const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+        expect(patient).toBeDefined();
+        createdPatientIds.push(patient.id);
+
+        // Unmount before the next iteration renders a second wizard into the
+        // same document — otherwise the field/dropdown lookups above would
+        // match two elements.
+        cleanup();
+      }
+
+      const locations = await medplum.searchResources('Location', facilityQuery);
+      expect(locations).toHaveLength(1);
+    },
+    90_000
+  );
+
+  test(
+    'renaming a facility updates the same Location in place rather than minting a second',
+    async () => {
+      // Tests the PLATFORM behavior the "codes are permanent, display names are
+      // free to change" design depends on: does a conditional upsert keyed on
+      // identifier update in place when a non-identifier field changes?
+      //
+      // Driven through `upsertResource` directly with a throwaway code rather
+      // than through the UI, deliberately: renaming a real facility would
+      // mutate state shared with every other test and with any real data on the
+      // server. The mechanism under test is identical either way.
+      const code = `zz-live-test-${Date.now()}`;
+      const query = { identifier: `${DJS_FACILITY_SYSTEM}|${code}` };
+      const base = {
+        resourceType: 'Location' as const,
+        status: 'active' as const,
+        identifier: [{ system: DJS_FACILITY_SYSTEM, value: code }],
+      };
+
+      const first = await medplum.upsertResource({ ...base, name: 'Short Name' }, query);
+      createdLocationIds.push(first.id);
+
+      // Same code, different display name — as a production rename would be.
+      const second = await medplum.upsertResource({ ...base, name: 'Official Long-Form Name' }, query);
+
+      expect(second.id).toBe(first.id);
+      const all = await medplum.searchResources('Location', query);
+      expect(all).toHaveLength(1);
+      expect(all[0].name).toBe('Official Long-Form Name');
+    },
+    30_000
+  );
+
+  test(
+    'reopening a screening reads the admission date and facility back from the server',
+    async () => {
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), family);
+      fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-18' } });
+      await selectFacility(user, 'Victor Cullen');
+      await saveSection(user, /save demographics/i);
+
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+
+      // Reopen from scratch — this exercises loadScreeningResources' Encounter
+      // search AND its readResource('Location', ...) resolution against the
+      // real server, then hydrateScreeningForm recovering the facility from the
+      // Location's identifier rather than its name.
+      cleanup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await waitFor(() => expect(fieldInput('Date of admission').value).toBe('2026-07-18'), { timeout: 15_000 });
+      expect((document.querySelector('select') as HTMLSelectElement).value).toBe('victor-cullen');
     },
     60_000
   );
