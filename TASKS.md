@@ -222,6 +222,115 @@ since a typo'd code string will silently match nothing rather than error.
 
 ---
 
+## FHIR-modeling audit (tasks 24–35)
+
+A full pass over every save handler, prompted by task 17 step 6: where else
+is DJS data modeled as free text or a merged string when FHIR has a
+standard model for it? Findings below, grouped by class and ordered by
+priority. **One is active data loss (task 24); the rest are correctness or
+interoperability.**
+
+Two cross-cutting facts established by the audit, worth knowing before
+picking any of these up:
+
+- **There is no clinical terminology anywhere in the wizard.** The only
+  coded systems in the file are the four status bindings FHIR constraints
+  *forced* us to add, plus `data-absent-reason`. No LOINC, no SNOMED, no
+  RxNorm.
+- **`Observation.category` is never set on any resource**, and there is no
+  `performer`/`recorder`/`asserter` on anything — verified by grep, not
+  assumed.
+
+### Tier 1 — data loss and clear correctness bugs
+
+**Task 24 — create the Encounter; persist admission date + facility.
+DATA LOSS.** `admissionDate` and `facilityName` are captured in the JSX,
+shown in `PatientBand`, and read by **no save handler**. Same class as
+epipen/task-18/19, and **invisible to the field-integrity script** because
+they're `useState`, not FormState keys — a reminder that the script's
+"set but never read" side doesn't cover section-1/2 scalar state at all.
+The reason they have nowhere to go is the modeling gap: the wizard never
+creates an `Encounter`, though an admission screening *is* one.
+**Design decisions resolved 2026-07-26:** facility is a real first-class
+`Location` resource (in any final product Location reflects the custodial
+system, so it must be referenceable, not a display string), and the wizard
+creates the Encounter rather than only consuming a passed-in `encounterId`.
+Remaining question: how a typed facility name resolves to a Location
+without minting duplicates on a typo. Also link the rest — Condition,
+AllergyIntolerance, MedicationStatement (`.context`) and CarePlan all
+support an encounter link and none use it today.
+
+**Task 25 — blood pressure as components, not a string.** Saved as
+`valueString: "120/80"`. FHIR models BP as a panel of two
+`Observation.component` entries. As a string it can't be trended or
+alerted on, and pediatric BP percentile checks are impossible. Same
+merged-string class as the dosage fix.
+
+### Tier 2 — standards work, each contained
+
+- **Task 26 — LOINC + `category: vital-signs` + UCUM on vitals.** US Core
+  makes the vital-signs profile mandatory. Keep `code.text` unchanged:
+  identifiers derive from it, so editing it would orphan every previously
+  saved Observation.
+- **Task 27 — assert "No known allergies" instead of discarding it.**
+  Currently `continue`d, so "no allergies" is indistinguishable from
+  "never asked" — meaningful in a screening.
+- **Task 28 — allergy `category`/`criticality`/`type`; per-allergy
+  reaction.** The grid items *are* FHIR's category value set. Separately,
+  the one shared reaction textarea is copied onto **every** checked
+  allergy, so three allergies each claim the same reaction — wrong data,
+  not just imprecise.
+- **Task 29 — practitioner attribution on every resource.** Nothing
+  records *who* asserted a finding, though Medplum knows the logged-in
+  user. For minors in state custody this is arguably peer to the
+  AccessPolicy backlog item: retraction-not-deletion preserves a trail,
+  but the trail can't say who.
+- **Task 30 — coded `Condition.category`** (`problem-list-item` /
+  `encounter-diagnosis`) instead of `{ text: 'Nursing diagnosis' }`.
+- **Task 31 — `CarePlan.activity[]` instead of `join('; ')`.** Third
+  instance of the merged-string pattern, with the same separator
+  fragility as the comma bug. Some plan items are arguably
+  `ServiceRequest`/`Task`, not plan text.
+- **Task 32 — sign-off as `performer` references.** Fourth merged-string
+  instance (`"Nurse: X; Physician: Y"`, regex-parsed back). The nurse and
+  physician are typed *strings* with no link to real Practitioner
+  accounts, so a legally meaningful sign-off is unattributable.
+
+### Tier 3 — larger, or blocked on a decision
+
+**Task 33 — US Core demographics conformance.** A real conformance bug,
+not a preference: `us-core-race` and `us-core-ethnicity` are **complex
+extensions** (`ombCategory` + `text` sub-extensions), and we write a flat
+`valueCodeableConcept` under those official URLs — claiming US Core while
+failing it. Fixing race also removes the documented comma-join
+reconstruction ambiguity. Folds in BCP-47 language coding.
+
+**Task 34 — SPIKE: QuestionnaireResponse as the persistence model.**
+Timeboxed evaluation, deliverable is a written recommendation, not code.
+Relevant to the Medplum evaluation specifically: most of this project's
+bug backlog — identifier collisions, comma escaping, retraction scoping,
+read-back mapping, "wired in JSX but never saved" — is *inherent to
+hand-rolling form persistence*, and `QuestionnaireResponse` round-trips
+losslessly by construction. The question worth answering is whether the
+current architecture is fighting the platform, and what a migration costs.
+
+**Task 35 — checklist code/value inversion + past history as Condition.**
+Largest item; **needs a design decision before it's decomposed.** Across
+appearance/ROS/dental/infectious the *value* carries the finding and the
+*code* is a bucket, inverting FHIR's convention — so findings are
+unqueryable by code ("find patients with a head injury" is unanswerable).
+Past history items are arguably the wrong *resource* too (Condition, not
+Observation-with-value).
+
+**Sequencing note — read before picking up task 20.** Task 35 changes how
+identifiers are derived from item names, which is the same surface task 20
+(comma escaping) addresses; doing task 20 first risks redoing it, or
+fixing something that no longer exists. And task 35 may be substantially
+subsumed by the task 34 spike. Order: 34 → 35 → 20. Both dependencies are
+recorded in the task tracker.
+
+---
+
 ## Backlog — before this could be pilot-ready, not blocking the demo
 
 - **AccessPolicy.** Nothing currently restricts the sensitive sections
@@ -229,7 +338,10 @@ since a typo'd code string will silently match nothing rather than error.
   custody) beyond default patient-record visibility. The retraction model
   keeps an audit trail; access control is separate and unbuilt.
 - **Coded terminology.** Most fields save free-text `CodeableConcept.text`
-  rather than SNOMED/LOINC/RxNorm codes. Medication dose/frequency were
+  rather than SNOMED/LOINC/RxNorm codes. Now itemized by the FHIR-modeling
+  audit above rather than left as one vague backlog line — see tasks 26
+  (vitals/LOINC), 28 (allergy category), 30 (Condition.category), 33
+  (US Core demographics) and 22 (RxNorm). Medication dose/frequency were
   pulled out of this bucket by task 17 step 6 (now structured `Dosage`
   fields, UCUM-coded where recognized); the medication *name* itself is
   still free text — see task 22.
