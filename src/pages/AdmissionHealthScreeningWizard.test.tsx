@@ -7,7 +7,7 @@ import { validateResource } from '@medplum/core';
 import type { Bundle, Patient, Resource } from '@medplum/fhirtypes';
 import { DrAliceSmith, MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, expect, test, vi } from 'vitest';
@@ -234,6 +234,45 @@ describe('AdmissionHealthScreeningWizard', () => {
       });
       expect(secondObservations).toHaveLength(1);
       expect(secondObservations[0].id).toBe(firstObservationId);
+    });
+
+    // A checklist item whose real-world name contains a comma —
+    // "Insect allergy (bee, wasp, ant)" is on the actual form — silently broke
+    // the conditional-PUT match: FHIR search treats an unescaped comma inside a
+    // token value as an OR-separator, so the upsert query matched nothing and
+    // created a second resource on every resave instead of updating the first.
+    // Confirmed directly against MockClient.upsertResource before this test
+    // existed; escapeSearchToken() is the fix.
+    test('saving an allergy whose name contains a comma updates in place, not duplicates', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Insect allergy (bee, wasp, ant)'));
+      await saveSection(user, /save health status/i);
+
+      // Filter client-side by exact identifier.value rather than searching by
+      // it — the target key itself contains the comma under test, so a
+      // FHIR-search-based lookup here would hit the very same escaping issue
+      // the fix addresses and could pass for the wrong reason.
+      const targetKey = 'allergy::Insect allergy (bee, wasp, ant)';
+      const findByKey = async (): Promise<{ id?: string }[]> => {
+        const all = await medplum.searchResources('AllergyIntolerance', {});
+        return all.filter((r) => r.identifier?.some((i) => i.system === SCREENING_ID_SYSTEM && i.value === targetKey));
+      };
+
+      const afterFirst = await findByKey();
+      expect(afterFirst).toHaveLength(1);
+      const firstId = afterFirst[0].id;
+
+      // Re-save the same section with nothing changed.
+      await saveSection(user, /save health status/i);
+
+      const afterSecond = await findByKey();
+      expect(afterSecond).toHaveLength(1);
+      expect(afterSecond[0].id).toBe(firstId);
     });
   });
 
@@ -483,6 +522,46 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(await byCode('Primary care provider')).toBe('Dr Patel');
       expect(await byCode('Chronic conditions: additional comments')).toBe('Asthma well controlled on inhaler');
       expect(await byCode('Injuries/trauma: details')).toBe('Fractured wrist 2023, healed');
+    });
+  });
+
+  describe('free-text field persistence (task 19)', () => {
+    // Same class of bug as task 18: disposition-notes, signoff-datetime, and
+    // review-date were rendered in the JSX but read by no save handler, so the
+    // nurse's input was silently discarded. Drives them through the UI and
+    // asserts each one actually persisted as an Observation.
+    test('disposition notes, signoff datetime, and review date are saved', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Diagnosis & Disposition');
+      await user.type(fieldTextarea('Additional notes on referrals, logs, or records requested'), 'Referred to dental');
+      // Date/datetime-local inputs are unreliable to type character-by-character
+      // in jsdom, so set the value directly, same as a browser's native picker would.
+      fireEvent.change(fieldInput('Date & time completed'), { target: { value: '2026-07-26T10:15' } });
+      fireEvent.change(fieldInput('Review date'), { target: { value: '2026-08-15' } });
+      await saveSection(user, /save diagnosis & disposition/i);
+
+      const byCode = async (code: string): Promise<Resource | undefined> => {
+        const [obs] = await medplum.searchResources('Observation', {
+          identifier: `${SCREENING_ID_SYSTEM}|${code}`,
+        });
+        return obs;
+      };
+
+      // Note: the identifier code is 'Disposition: additional notes', not the
+      // on-screen label — the label's commas would break the identifier search
+      // (see escapeSearchToken's doc comment on AdmissionHealthScreeningWizard).
+      const notes = await byCode('Disposition: additional notes');
+      expect((notes as { valueString?: string })?.valueString).toBe('Referred to dental');
+
+      const signoffDatetime = await byCode('Admission screening sign-off date/time');
+      expect((signoffDatetime as { valueDateTime?: string })?.valueDateTime).toBe('2026-07-26T10:15');
+
+      const reviewDate = await byCode('Admission screening review date');
+      expect((reviewDate as { valueDateTime?: string })?.valueDateTime).toBe('2026-08-15');
     });
   });
 });

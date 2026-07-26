@@ -217,8 +217,25 @@ export function AdmissionHealthScreeningWizard({
    * patients without colliding. `param` differs by resource type —
    * AllergyIntolerance searches on `patient`, everything else on `subject`.
    */
+  /**
+   * FHIR search treats `,` (OR-separator), `|` (system delimiter), `$`, and
+   * `\` as syntactically significant inside a token value, so a literal one
+   * must be backslash-escaped or the search silently splits/misparses it.
+   * Every identifier here is derived from real-world text (a checklist item
+   * or a form-field label), and several genuinely contain a comma —
+   * "Insect allergy (bee, wasp, ant)", "Measles, mumps, or rubella" — which
+   * without this made the conditional-PUT match nothing and duplicate the
+   * resource on every resave instead of updating it, silently defeating
+   * task 8's whole guarantee. Confirmed live via `medplum.upsertResource`
+   * called twice with such a key. The escaping is applied only to the search
+   * token; the stored `identifier.value` itself stays exact and unescaped.
+   */
+  function escapeSearchToken(value: string): string {
+    return value.replace(/[\\|$,]/g, (c) => `\\${c}`);
+  }
+
   function upsertQuery(key: string, subject: Reference<Patient>, param: 'subject' | 'patient' = 'subject') {
-    return { identifier: `${SCREENING_ID_SYSTEM}|${key}`, [param]: subject.reference as string };
+    return { identifier: `${SCREENING_ID_SYSTEM}|${escapeSearchToken(key)}`, [param]: subject.reference as string };
   }
 
   /**
@@ -718,6 +735,36 @@ export function AdmissionHealthScreeningWizard({
       valueString: `Nurse: ${form.text('nurse-signature') || '—'}; Physician: ${form.text('physician-signature') || '—'}`,
       note: form.text('health-alerts') ? [{ text: form.text('health-alerts') }] : undefined,
     });
+
+    // Task 19: disposition-notes, signoff-datetime, and review-date were
+    // rendered in the JSX but read by no save handler, so the nurse's input
+    // was silently discarded — the same epipen/task-18 class of data loss.
+    await saveObservationSet(subject, [
+      {
+        // NOT the field's on-screen label verbatim: that label contains
+        // commas, and every identifier here is derived from code.text (see
+        // obs()'s doc comment). FHIR search treats a comma inside a token
+        // value as an OR-separator, so an identifier search for a
+        // comma-containing value silently matches nothing — discovered when
+        // this exact string broke `identifier=system|value` lookups. Keep
+        // derived-identifier codes comma-free, matching the convention
+        // already used elsewhere (e.g. 'Chronic conditions: additional
+        // comments').
+        code: 'Disposition: additional notes',
+        value: form.text('disposition-notes') ? { valueString: form.text('disposition-notes') } : undefined,
+      },
+      {
+        code: 'Admission screening sign-off date/time',
+        value: form.text('signoff-datetime') ? { valueDateTime: form.text('signoff-datetime') } : undefined,
+      },
+      {
+        // Observation.value[x] has no valueDate — FHIR's dateTime type
+        // accepts a date-only string (e.g. "2026-07-26"), so valueDateTime
+        // holds this correctly without a spurious time component.
+        code: 'Admission screening review date',
+        value: form.text('review-date') ? { valueDateTime: form.text('review-date') } : undefined,
+      },
+    ]);
 
     // Scoped to the nursing-diagnosis prefix so this cannot touch the chronic
     // conditions reconciled by saveAllergiesChronic, which are also Conditions.
