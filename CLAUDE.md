@@ -54,6 +54,14 @@ server via client-credentials login — no `MockClient`. Requires:
 Without those two env vars the whole file skips — `npm test` and a
 credential-less `npm run test:live` both stay green.
 
+**Full walkthrough, troubleshooting, and the diagnostic technique that
+actually works when a live test fails silently: `RUNNING-LIVE-TESTS.md`.**
+This section stays short on purpose; that file has the detail, including
+things learned the hard way (no seeded admin account on this compose
+file, an `npm install` conflict that looked like a real dependency
+problem and wasn't, and how the allergy-retraction platform finding below
+was actually tracked down rather than guessed at).
+
 **This suite exists because `MockClient` lies about server behavior in
 both directions** — it enforces things the real server doesn't (nothing),
 and permits things the real server rejects (nothing validated). Every

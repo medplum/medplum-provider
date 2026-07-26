@@ -23,3 +23,6 @@ package-lock.json
 *.njsproj
 *.sln
 *.sw?
+
+# credentials file for test:live
+client-credentials.txt

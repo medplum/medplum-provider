@@ -28,7 +28,8 @@ upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
   absent-vs-zero, form read-back, the `screeningData` loader, and field
   integrity. Stable across repeated runs.
 - **Live suite** (`npm run test:live`, needs a real Medplum server + a
-  `ClientApplication`'s id/secret — see `CLAUDE.md`) — idempotency,
+  `ClientApplication`'s id/secret — see `CLAUDE.md`, and `RUNNING-LIVE-
+  TESTS.md` for the full setup/troubleshooting walkthrough) — idempotency,
   constraint acceptance, and retraction round-trip, all green against a
   real server. This suite has repeatedly caught real server-only bugs the
   unit suite couldn't (a search form `MockClient` fakes but the server
