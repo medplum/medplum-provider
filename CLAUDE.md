@@ -199,6 +199,17 @@ it. Never narrow a search this way — fetch by patient/subject and filter
 the identifier system client-side instead (see `screeningData.ts`,
 `retractStale`).
 
+**Conditional PUT on a *populated* custom identifier does work correctly**
+— the positive counterpart to the finding above, confirmed live in task 24.
+`upsertResource` matching on `identifier=<system>|<value>` converges as
+intended on the real server: re-saving, and two different patients
+selecting the same facility, all resolve to one `Location` rather than
+duplicating it. Verified across two consecutive live runs, so both the
+create path and the reuse-an-existing path are covered. This is what the
+whole no-duplicate-facilities design rests on, so it's worth knowing it's
+proven rather than assumed — the divergence above is specific to the
+*empty-value* form.
+
 ## Bug classes that have bitten here — don't reintroduce
 
 **Stale closure for the subject reference.** Reading `patient` state right

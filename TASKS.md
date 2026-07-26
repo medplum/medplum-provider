@@ -311,18 +311,45 @@ Purely additive, needs no facility code to change. Structural rather than
 a guessed `Location.type` code, since no canonical type for a juvenile
 facility class is known.
 
-**Task 25 — blood pressure as components, not a string.** Saved as
-`valueString: "120/80"`. FHIR models BP as a panel of two
-`Observation.component` entries. As a string it can't be trended or
-alerted on, and pediatric BP percentile checks are impossible. Same
-merged-string class as the dosage fix.
+**Task 25 — blood pressure as components, not a string. — DONE.** Was
+`valueString: "120/80"`; now FHIR's standard two-component panel, with
+LOINC 8480-6 / 8462-4 and UCUM `mm[Hg]` — all three verified against
+hl7.org/fhir/R4/bp.html rather than recalled.
+
+**The UI changed too, and that's the more important half.** Systolic and
+diastolic are now **two numeric inputs** rather than one `120/80` box. That
+wasn't cosmetic: capturing two facts in one text field and parsing them
+apart is the exact anti-pattern just fixed for medication dosage and
+sign-off, and fixing it only at the storage layer would have left the
+parse — and its lossy fallback — sitting at the input layer. With split
+inputs the save path has **nothing to parse and no fallback to degrade
+into**. A half-filled reading records the half that exists; FHIR permits a
+single-component panel.
+
+The string parser survives in exactly one role: **reading legacy data**.
+Every BP saved before this change is a `valueString`, and those must keep
+loading rather than coming back blank. Nothing writes that form anymore.
+
+`code.text` stays `'Blood pressure'` — identifiers derive from it, so
+changing it would orphan every previously saved reading.
+`DjsPatientSummary` needed updating too: a component-only panel has no
+top-level `value[x]`, so it would otherwise have rendered `—`.
+
+Mutation-verified twice, including a **transposed-LOINC** mutation
+(systolic code on the diastolic component) — a silent clinical error a
+round-trip test can't catch, since both sides would use the same constant.
+Five tests fail on it, because the read-back fixtures hardcode the codes
+instead of importing them. Worth preserving that property.
 
 ### Tier 2 — standards work, each contained
 
-- **Task 26 — LOINC + `category: vital-signs` + UCUM on vitals.** US Core
-  makes the vital-signs profile mandatory. Keep `code.text` unchanged:
-  identifiers derive from it, so editing it would orphan every previously
-  saved Observation.
+- **Task 26 — LOINC + `category: vital-signs` + UCUM on the *remaining*
+  vitals.** US Core makes the vital-signs profile mandatory. BP was already
+  done by task 25 (its components require codes, so it couldn't be
+  deferred); temp/pulse/resp/weight/height/BMI still need theirs, and
+  **`category: vital-signs` is still missing on every vital including BP**.
+  Keep `code.text` unchanged: identifiers derive from it, so editing it
+  would orphan every previously saved Observation.
 - **Task 27 — assert "No known allergies" instead of discarding it.**
   Currently `continue`d, so "no allergies" is indistinguishable from
   "never asked" — meaningful in a screening.

@@ -506,4 +506,53 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
     },
     60_000
   );
+
+  test(
+    'the real server accepts and round-trips the blood-pressure component panel (task 25)',
+    async () => {
+      // An Observation carrying its value in `component` with NO top-level
+      // value[x] is a shape this codebase had never written before task 25.
+      // MockClient stores anything, so only a real write proves the server
+      // accepts it — and that the components survive a round-trip with their
+      // LOINC codes and UCUM units intact rather than being silently dropped.
+      const family = uniqueFamily();
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), family);
+      await saveSection(user, /save demographics/i);
+      const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
+      expect(patient).toBeDefined();
+      createdPatientIds.push(patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      await user.type(screen.getByLabelText('Systolic'), '128');
+      await user.type(screen.getByLabelText('Diastolic'), '82');
+      await saveSection(user, /save health status/i);
+
+      const [bp] = await medplum.searchResources('Observation', {
+        subject: `Patient/${patient.id}`,
+        identifier: `${SCREENING_ID_SYSTEM}|Blood pressure`,
+      });
+      expect(bp).toBeDefined();
+      expect(bp.valueString).toBeUndefined();
+      expect(bp.component).toHaveLength(2);
+
+      const systolic = bp.component?.find((c) => c.code?.coding?.some((cd) => cd.code === '8480-6'));
+      const diastolic = bp.component?.find((c) => c.code?.coding?.some((cd) => cd.code === '8462-4'));
+      expect(systolic?.valueQuantity?.value).toBe(128);
+      expect(systolic?.valueQuantity?.code).toBe('mm[Hg]');
+      expect(diastolic?.valueQuantity?.value).toBe(82);
+
+      // Reopen and confirm both fields repopulate from the server's copy.
+      cleanup();
+      await renderWizardForPatient(medplum, patient.id);
+      await goToStep(user, 'Current Health Status');
+      await waitFor(() => expect((screen.getByLabelText('Systolic') as HTMLInputElement).value).toBe('128'), {
+        timeout: 15_000,
+      });
+      expect((screen.getByLabelText('Diastolic') as HTMLInputElement).value).toBe('82');
+    },
+    90_000
+  );
 });

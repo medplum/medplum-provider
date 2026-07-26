@@ -10,6 +10,7 @@ import type {
   Location,
   MedicationStatement,
   Observation,
+  ObservationComponent,
   Quantity,
   Resource,
 } from '@medplum/fhirtypes';
@@ -50,6 +51,103 @@ export function isScreeningRetracted(res: Resource): boolean {
 export function screeningKey(res: Resource): string | undefined {
   const withIdentifier = res as { identifier?: { system?: string; value?: string }[] };
   return withIdentifier.identifier?.find((i) => i.system === SCREENING_ID_SYSTEM)?.value;
+}
+
+/**
+ * Blood pressure is modeled as FHIR's standard two-component panel rather than
+ * a "120/80" string. Codes verified against the FHIR R4 blood-pressure profile
+ * (hl7.org/fhir/R4/bp.html), which fixes all three.
+ *
+ * A BP string can't be trended, alerted on, or compared — and a pediatric BP
+ * percentile check, which this population actually needs, is impossible
+ * against text. The panel's own `code.text` stays `'Blood pressure'`: screening
+ * identifiers derive from it, so changing it would orphan every previously
+ * saved reading.
+ */
+/**
+ * The BP panel's `code.text`. Exported so the wizard, read-back, and the
+ * summary display share one definition — the save/read/display paths all
+ * depend on the same components now, so a drifted string here would strand a
+ * reading in three places at once.
+ */
+export const BLOOD_PRESSURE_CODE = 'Blood pressure';
+
+const UCUM_SYSTEM = 'http://unitsofmeasure.org';
+const LOINC_SYSTEM = 'http://loinc.org';
+const BP_SYSTOLIC_LOINC = '8480-6';
+const BP_DIASTOLIC_LOINC = '8462-4';
+
+function bpComponent(loinc: string, display: string, value: number): ObservationComponent {
+  return {
+    code: { coding: [{ system: LOINC_SYSTEM, code: loinc, display }], text: display },
+    valueQuantity: { value, unit: 'mmHg', system: UCUM_SYSTEM, code: 'mm[Hg]' },
+  };
+}
+
+/**
+ * Builds the systolic/diastolic components from the two BP inputs.
+ *
+ * The form captures systolic and diastolic as **separate numeric fields**, so
+ * unlike the medication dose there is nothing to parse here and no lossy
+ * text fallback to fall back to — the data is already structured at the point
+ * of entry. A half-filled reading still records the half that exists rather
+ * than discarding it; FHIR permits a panel with a single component.
+ *
+ * Returns `undefined` when neither field has a usable number, so the caller
+ * omits the Observation entirely rather than writing an empty one (`ele-1`).
+ */
+export function buildBloodPressureComponents(
+  systolic: string | undefined,
+  diastolic: string | undefined
+): ObservationComponent[] | undefined {
+  const components: ObservationComponent[] = [];
+  const sys = Number(systolic);
+  const dia = Number(diastolic);
+  if (systolic && Number.isFinite(sys)) {
+    components.push(bpComponent(BP_SYSTOLIC_LOINC, 'Systolic blood pressure', sys));
+  }
+  if (diastolic && Number.isFinite(dia)) {
+    components.push(bpComponent(BP_DIASTOLIC_LOINC, 'Diastolic blood pressure', dia));
+  }
+  return components.length > 0 ? components : undefined;
+}
+
+/**
+ * Recovers the two BP fields from a saved Observation, for read-back and
+ * display.
+ *
+ * Falls back to parsing a legacy `valueString` such as `"120/80"`: every
+ * reading saved before this change is stored that way, and those must keep
+ * loading rather than silently coming back blank. That parse is now purely a
+ * backward-compatibility path — nothing writes a BP string anymore.
+ */
+export function bloodPressureFromObservation(obs: Observation | undefined): {
+  systolic?: string;
+  diastolic?: string;
+} {
+  if (!obs) {
+    return {};
+  }
+  const byCode = (loinc: string): string | undefined => {
+    const value = obs.component?.find((c) => c.code?.coding?.some((cd) => cd.code === loinc))?.valueQuantity?.value;
+    return value === undefined ? undefined : String(value);
+  };
+  const systolic = byCode(BP_SYSTOLIC_LOINC);
+  const diastolic = byCode(BP_DIASTOLIC_LOINC);
+  if (systolic !== undefined || diastolic !== undefined) {
+    return { systolic, diastolic };
+  }
+  const legacy = /^\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*$/.exec(obs.valueString ?? '');
+  return legacy ? { systolic: legacy[1], diastolic: legacy[2] } : {};
+}
+
+/** `"120/80"` for display, or whatever half of it exists. Empty when neither does. */
+export function bloodPressureText(obs: Observation | undefined): string {
+  const { systolic, diastolic } = bloodPressureFromObservation(obs);
+  if (systolic === undefined && diastolic === undefined) {
+    return '';
+  }
+  return `${systolic ?? '—'}/${diastolic ?? '—'}`;
 }
 
 /**

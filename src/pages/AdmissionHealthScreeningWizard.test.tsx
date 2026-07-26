@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import type { WithId } from '@medplum/core';
 import { validateResource } from '@medplum/core';
-import type { Bundle, Encounter, Location, Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Encounter, Location, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { DrAliceSmith, MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -601,6 +601,90 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(select.options).toHaveLength(DJS_FACILITIES.length + 1);
       // An "Other"/free-text option would reintroduce the duplication problem.
       expect(screen.queryByRole('option', { name: /other/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('blood pressure panel (task 25)', () => {
+    test('saves systolic and diastolic as coded components, with no value string', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      await user.type(screen.getByLabelText('Systolic'), '128');
+      await user.type(screen.getByLabelText('Diastolic'), '82');
+      await saveSection(user, /save health status/i);
+
+      const bp = capture.written.find(
+        (r) => r.resourceType === 'Observation' && (r as Observation).code?.text === 'Blood pressure'
+      ) as Observation | undefined;
+
+      expect(bp).toBeDefined();
+      // The reading lives in components; a panel has no top-level value[x].
+      expect(bp?.valueString).toBeUndefined();
+      expect(bp?.valueQuantity).toBeUndefined();
+      expect(bp?.component).toHaveLength(2);
+
+      const systolic = bp?.component?.find((c) => c.code?.coding?.[0].code === '8480-6');
+      const diastolic = bp?.component?.find((c) => c.code?.coding?.[0].code === '8462-4');
+      expect(systolic?.valueQuantity).toEqual({
+        value: 128,
+        unit: 'mmHg',
+        system: 'http://unitsofmeasure.org',
+        code: 'mm[Hg]',
+      });
+      expect(diastolic?.valueQuantity?.value).toBe(82);
+
+      expect(capture.validationErrors).toEqual([]);
+    });
+
+    test('populates both BP fields on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Okafor' }] });
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject: { reference: `Patient/${patient.id}` },
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Blood pressure' }],
+        code: { text: 'Blood pressure' },
+        component: [
+          { code: { coding: [{ code: '8480-6' }] }, valueQuantity: { value: 132, unit: 'mmHg' } },
+          { code: { coding: [{ code: '8462-4' }] }, valueQuantity: { value: 86, unit: 'mmHg' } },
+        ],
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      await waitFor(() => expect((screen.getByLabelText('Systolic') as HTMLInputElement).value).toBe('132'));
+      expect((screen.getByLabelText('Diastolic') as HTMLInputElement).value).toBe('86');
+    });
+
+    // Readings saved before task 25 are a "120/80" valueString; reopening one
+    // must still fill the two fields rather than silently losing it.
+    test('populates both BP fields from a legacy value string', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Prior' }] });
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject: { reference: `Patient/${patient.id}` },
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Blood pressure' }],
+        code: { text: 'Blood pressure' },
+        valueString: '110/70',
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      await waitFor(() => expect((screen.getByLabelText('Systolic') as HTMLInputElement).value).toBe('110'));
+      expect((screen.getByLabelText('Diastolic') as HTMLInputElement).value).toBe('70');
     });
   });
 

@@ -9,7 +9,14 @@ import type {
   Patient,
 } from '@medplum/fhirtypes';
 import { DJS_FACILITY_SYSTEM } from './djsFacilities';
-import { ADMISSION_ENCOUNTER_KEY, dosageToFields, screeningKey, type ScreeningResources } from './screeningData';
+import {
+  ADMISSION_ENCOUNTER_KEY,
+  BLOOD_PRESSURE_CODE,
+  bloodPressureFromObservation,
+  dosageToFields,
+  screeningKey,
+  type ScreeningResources,
+} from './screeningData';
 
 /**
  * The wizard's dedicated `useState` fields (sections 1–2) that read-back can
@@ -36,7 +43,9 @@ export interface HydratedScalars {
   temp?: string;
   pulse?: string;
   resp?: string;
-  bp?: string;
+  /** Systolic and diastolic are separate fields, mirroring the FHIR BP panel's two components. */
+  systolic?: string;
+  diastolic?: string;
   weight?: string;
   height?: string;
   hasComplaint?: string;
@@ -66,7 +75,6 @@ const VITAL_CODE_TO_FIELD: Record<string, keyof HydratedScalars> = {
   'Body temperature': 'temp',
   'Heart rate': 'pulse',
   'Respiratory rate': 'resp',
-  'Blood pressure': 'bp',
   'Body weight': 'weight',
   'Body height': 'height',
 };
@@ -244,9 +252,24 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
       continue;
     }
 
+    // Blood pressure is a two-component panel, not a scalar, so it can't go
+    // through VITAL_CODE_TO_FIELD. `bloodPressureFromObservation` also parses
+    // the legacy "120/80" valueString, so readings saved before task 25 still
+    // load instead of coming back blank.
+    if (code === BLOOD_PRESSURE_CODE) {
+      const { systolic, diastolic } = bloodPressureFromObservation(obs);
+      if (systolic !== undefined) {
+        scalars.systolic = systolic;
+      }
+      if (diastolic !== undefined) {
+        scalars.diastolic = diastolic;
+      }
+      continue;
+    }
+
     const vitalField = VITAL_CODE_TO_FIELD[code];
     if (vitalField) {
-      const value = code === 'Blood pressure' ? obs.valueString : quantityValue(obs);
+      const value = quantityValue(obs);
       if (value !== undefined) {
         scalars[vitalField] = value as never;
       }

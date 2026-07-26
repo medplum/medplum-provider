@@ -23,6 +23,8 @@ import { useFormState } from './formState';
 // summary/read-back loads it back by the same key.
 import {
   ADMISSION_ENCOUNTER_KEY,
+  BLOOD_PRESSURE_CODE,
+  buildBloodPressureComponents,
   buildDosage,
   isScreeningRetracted,
   loadScreeningResources,
@@ -112,7 +114,12 @@ export function AdmissionHealthScreeningWizard({
   const [temp, setTemp] = useState('');
   const [pulse, setPulse] = useState('');
   const [resp, setResp] = useState('');
-  const [bp, setBp] = useState('');
+  // Captured as two numeric fields rather than one "120/80" string, so the
+  // reading is structured at the point of entry and the save path has nothing
+  // to parse (and so no lossy fallback to degrade into). Mirrors the FHIR BP
+  // panel's two components exactly.
+  const [systolic, setSystolic] = useState('');
+  const [diastolic, setDiastolic] = useState('');
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
   const [hasComplaint, setHasComplaint] = useState<string>();
@@ -160,7 +167,8 @@ export function AdmissionHealthScreeningWizard({
       if (scalars.temp !== undefined) setTemp(scalars.temp);
       if (scalars.pulse !== undefined) setPulse(scalars.pulse);
       if (scalars.resp !== undefined) setResp(scalars.resp);
-      if (scalars.bp !== undefined) setBp(scalars.bp);
+      if (scalars.systolic !== undefined) setSystolic(scalars.systolic);
+      if (scalars.diastolic !== undefined) setDiastolic(scalars.diastolic);
       if (scalars.weight !== undefined) setWeight(scalars.weight);
       if (scalars.height !== undefined) setHeight(scalars.height);
       if (scalars.hasComplaint !== undefined) setHasComplaint(scalars.hasComplaint);
@@ -546,6 +554,7 @@ export function AdmissionHealthScreeningWizard({
   }
 
   async function saveVitals(subject: Reference<Patient>) {
+    const bpComponents = buildBloodPressureComponents(systolic, diastolic);
     const visionFields: [string, string][] = [
       ['vision-nocorr-left', 'Visual acuity, left eye, without correction'],
       ['vision-nocorr-right', 'Visual acuity, right eye, without correction'],
@@ -559,7 +568,13 @@ export function AdmissionHealthScreeningWizard({
       { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp), unit: '°F' } } : undefined },
       { code: 'Heart rate', value: pulse ? { valueQuantity: { value: Number(pulse), unit: '/min' } } : undefined },
       { code: 'Respiratory rate', value: resp ? { valueQuantity: { value: Number(resp), unit: '/min' } } : undefined },
-      { code: 'Blood pressure', value: bp ? { valueString: bp } : undefined },
+      {
+        // A BP panel carries its reading in `component`, with no top-level
+        // value[x] — the two numbers are separate observations of separate
+        // things, not one datum.
+        code: BLOOD_PRESSURE_CODE,
+        value: bpComponents ? { component: bpComponents } : undefined,
+      },
       { code: 'Body weight', value: weight ? { valueQuantity: { value: Number(weight), unit: 'lb' } } : undefined },
       { code: 'Body height', value: height ? { valueQuantity: { value: Number(height), unit: 'in' } } : undefined },
       {
@@ -988,7 +1003,34 @@ export function AdmissionHealthScreeningWizard({
                     <Field label="Temp (°F)"><input type="text" value={temp} onChange={(e) => setTemp(e.target.value)} /></Field>
                     <Field label="Pulse"><input type="text" value={pulse} onChange={(e) => setPulse(e.target.value)} /></Field>
                     <Field label="Resp"><input type="text" value={resp} onChange={(e) => setResp(e.target.value)} /></Field>
-                    <Field label="BP"><input type="text" placeholder="120/80" value={bp} onChange={(e) => setBp(e.target.value)} /></Field>
+                    <Field label="BP (mmHg)">
+                      {/* Two fields, not one "120/80" box: the reading is
+                          structured at entry, so nothing downstream has to
+                          parse it or degrade to text when a parse fails. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={300}
+                          aria-label="Systolic"
+                          placeholder="120"
+                          value={systolic}
+                          onChange={(e) => setSystolic(e.target.value)}
+                        />
+                        <span aria-hidden="true" style={{ color: 'var(--muted)' }}>
+                          /
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={200}
+                          aria-label="Diastolic"
+                          placeholder="80"
+                          value={diastolic}
+                          onChange={(e) => setDiastolic(e.target.value)}
+                        />
+                      </div>
+                    </Field>
                     <Field label="Weight (lb)"><input type="text" value={weight} onChange={(e) => setWeight(e.target.value)} /></Field>
                     <Field label="Height (in)"><input type="text" value={height} onChange={(e) => setHeight(e.target.value)} /></Field>
                     <Field label="BMI (computed)">

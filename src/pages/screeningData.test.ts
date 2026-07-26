@@ -1,10 +1,19 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import type { WithId } from '@medplum/core';
-import type { Patient, Resource } from '@medplum/fhirtypes';
+import type { Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { buildDosage, dosageToFields, loadScreeningResources, parseDoseQuantity, SCREENING_ID_SYSTEM } from './screeningData';
+import {
+  bloodPressureFromObservation,
+  bloodPressureText,
+  buildBloodPressureComponents,
+  buildDosage,
+  dosageToFields,
+  loadScreeningResources,
+  parseDoseQuantity,
+  SCREENING_ID_SYSTEM,
+} from './screeningData';
 
 function screeningId(value: string): { system: string; value: string }[] {
   return [{ system: SCREENING_ID_SYSTEM, value }];
@@ -136,6 +145,76 @@ describe('loadScreeningResources', () => {
     expect(data.medications).toEqual([]);
     expect(data.carePlans).toEqual([]);
     expect(data.byKey.size).toBe(0);
+  });
+});
+
+describe('buildBloodPressureComponents (task 25)', () => {
+  test('builds both components with LOINC codes and UCUM mm[Hg]', () => {
+    const components = buildBloodPressureComponents('120', '80');
+    expect(components).toEqual([
+      {
+        code: {
+          coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }],
+          text: 'Systolic blood pressure',
+        },
+        valueQuantity: { value: 120, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
+      },
+      {
+        code: {
+          coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }],
+          text: 'Diastolic blood pressure',
+        },
+        valueQuantity: { value: 80, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
+      },
+    ]);
+  });
+
+  test('records a half-filled reading rather than discarding it', () => {
+    expect(buildBloodPressureComponents('118', '')).toHaveLength(1);
+    expect(buildBloodPressureComponents('', '76')).toHaveLength(1);
+  });
+
+  test('returns undefined when neither field has a number, so no empty Observation is written (ele-1)', () => {
+    expect(buildBloodPressureComponents('', '')).toBeUndefined();
+    expect(buildBloodPressureComponents(undefined, undefined)).toBeUndefined();
+    expect(buildBloodPressureComponents('abc', 'def')).toBeUndefined();
+  });
+});
+
+describe('bloodPressureFromObservation (task 25)', () => {
+  test('round-trips what buildBloodPressureComponents wrote', () => {
+    const component = buildBloodPressureComponents('120', '80');
+    expect(bloodPressureFromObservation({ resourceType: 'Observation', status: 'final', component } as Observation)).toEqual(
+      { systolic: '120', diastolic: '80' }
+    );
+  });
+
+  test('parses a legacy "120/80" valueString, including odd spacing', () => {
+    const legacy = (valueString: string): Observation =>
+      ({ resourceType: 'Observation', status: 'final', valueString }) as Observation;
+    expect(bloodPressureFromObservation(legacy('120/80'))).toEqual({ systolic: '120', diastolic: '80' });
+    expect(bloodPressureFromObservation(legacy(' 118 / 76 '))).toEqual({ systolic: '118', diastolic: '76' });
+  });
+
+  test('returns empty for an unparseable string or a missing Observation', () => {
+    expect(
+      bloodPressureFromObservation({ resourceType: 'Observation', status: 'final', valueString: 'n/a' } as Observation)
+    ).toEqual({});
+    expect(bloodPressureFromObservation(undefined)).toEqual({});
+  });
+});
+
+describe('bloodPressureText (task 25)', () => {
+  test('formats a full reading and marks a missing half rather than faking it', () => {
+    const full = { resourceType: 'Observation', status: 'final', component: buildBloodPressureComponents('120', '80') };
+    expect(bloodPressureText(full as Observation)).toBe('120/80');
+
+    const half = { resourceType: 'Observation', status: 'final', component: buildBloodPressureComponents('120', '') };
+    expect(bloodPressureText(half as Observation)).toBe('120/—');
+  });
+
+  test('is empty when there is nothing recorded', () => {
+    expect(bloodPressureText(undefined)).toBe('');
   });
 });
 

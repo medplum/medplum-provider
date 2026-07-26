@@ -6,7 +6,14 @@ import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import '../theme/tokens.css';
-import { dosageToFields, loadScreeningResources, screeningKey, type ScreeningResources } from '../pages/screeningData';
+import {
+  BLOOD_PRESSURE_CODE,
+  bloodPressureText,
+  dosageToFields,
+  loadScreeningResources,
+  screeningKey,
+  type ScreeningResources,
+} from '../pages/screeningData';
 
 /** Vitals to show, in display order, keyed by the Observation code the wizard writes. */
 const VITALS: { code: string; label: string }[] = [
@@ -23,6 +30,13 @@ const PAIN_CODE = 'Pain severity - 0-10 verbal numeric rating';
 const SIGNOFF_CODE = 'Admission health screening sign-off';
 
 function observationValue(obs: Observation): string {
+  // A BP panel carries its reading in `component`, with no top-level value[x],
+  // so without this it would fall through every branch below and render '—'.
+  // `bloodPressureText` also handles the legacy "120/80" valueString form.
+  if (obs.code?.text === BLOOD_PRESSURE_CODE) {
+    const text = bloodPressureText(obs);
+    return text ? `${text} mmHg` : '—';
+  }
   if (obs.valueQuantity) {
     return `${obs.valueQuantity.value ?? ''} ${obs.valueQuantity.unit ?? ''}`.trim();
   }

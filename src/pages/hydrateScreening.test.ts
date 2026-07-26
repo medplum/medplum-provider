@@ -286,14 +286,70 @@ describe('hydrateScreeningForm', () => {
     data.observations = [
       obs('Body temperature', 'Body temperature', { valueQuantity: { value: 98.6, unit: '°F' } }),
       obs('Heart rate', 'Heart rate', { valueQuantity: { value: 72, unit: '/min' } }),
-      obs('Blood pressure', 'Blood pressure', { valueString: '120/80' }),
     ];
 
     const { scalars } = hydrateScreeningForm(data, undefined);
 
     expect(scalars.temp).toBe('98.6');
     expect(scalars.pulse).toBe('72');
-    expect(scalars.bp).toBe('120/80');
+  });
+
+  describe('blood pressure (task 25)', () => {
+    function bpObs(extra: Partial<Observation>): Observation {
+      return obs('Blood pressure', 'Blood pressure', extra);
+    }
+
+    test('reads systolic and diastolic back from the panel components', () => {
+      const data = empty();
+      data.observations = [
+        bpObs({
+          component: [
+            { code: { coding: [{ code: '8480-6' }] }, valueQuantity: { value: 120, unit: 'mmHg' } },
+            { code: { coding: [{ code: '8462-4' }] }, valueQuantity: { value: 80, unit: 'mmHg' } },
+          ],
+        }),
+      ];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.systolic).toBe('120');
+      expect(scalars.diastolic).toBe('80');
+    });
+
+    // Every reading saved before task 25 is a "120/80" valueString. Those must
+    // keep loading rather than silently coming back blank — this is the only
+    // reason the string parser still exists.
+    test('still reads a legacy "120/80" valueString', () => {
+      const data = empty();
+      data.observations = [bpObs({ valueString: '120/80' })];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.systolic).toBe('120');
+      expect(scalars.diastolic).toBe('80');
+    });
+
+    test('reads a half-recorded panel without inventing the missing half', () => {
+      const data = empty();
+      data.observations = [
+        bpObs({ component: [{ code: { coding: [{ code: '8480-6' }] }, valueQuantity: { value: 118 } }] }),
+      ];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.systolic).toBe('118');
+      expect(scalars.diastolic).toBeUndefined();
+    });
+
+    test('leaves both unset for an unparseable legacy string', () => {
+      const data = empty();
+      data.observations = [bpObs({ valueString: 'not recorded' })];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.systolic).toBeUndefined();
+      expect(scalars.diastolic).toBeUndefined();
+    });
   });
 
   test('maps pain with a score, and pain reported without one', () => {
