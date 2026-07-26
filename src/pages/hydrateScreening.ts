@@ -1,7 +1,14 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import type { AllergyIntolerance, CarePlan, Condition, Observation, Patient } from '@medplum/fhirtypes';
-import { screeningKey, type ScreeningResources } from './screeningData';
+import type {
+  AllergyIntolerance,
+  CarePlan,
+  Condition,
+  MedicationStatement,
+  Observation,
+  Patient,
+} from '@medplum/fhirtypes';
+import { dosageToFields, screeningKey, type ScreeningResources } from './screeningData';
 
 /**
  * The wizard's dedicated `useState` fields (sections 1–2) that read-back can
@@ -43,6 +50,8 @@ export interface HydratedForm {
   checks: Record<string, string[]>;
   /** FormState "Other:"-style inline free text: grid → item → typed text. */
   checkTexts: Record<string, Record<string, string>>;
+  /** FormState tables: table name → rows. */
+  rows: Record<string, string[][]>;
 }
 
 /** Observation code → the scalar vital field it fills. */
@@ -149,11 +158,13 @@ function textOrDateTime(obs: Observation): string | undefined {
  * resources back into form values, so reopening a partially-completed
  * screening shows what was entered instead of blank fields.
  *
- * Only fields the wizard actually persists can be repopulated. One known gap,
- * deliberately not mapped here (documented in TASKS.md task 17 step 6):
- * - Medications — `dosage`+`frequency` are merged into one string on save;
- *   splitting them back into the table's two columns is lossy and needs a
- *   product decision, not just code (see TASKS.md).
+ * Only fields the wizard actually persists can be repopulated. Medications
+ * (TASKS.md task 17 step 6) round-trip via `dosageToFields`, the inverse of
+ * `buildDosage` — dose and frequency are read from `Dosage`'s own structured
+ * fields (`doseAndRate.doseQuantity`, `timing.code.text`), not un-merged from
+ * one string, so there's nothing lossy left to document here. The drug name
+ * itself is still uncoded free text (`medicationCodeableConcept.text`) —
+ * mapping it to RxNorm is a separate, larger step (TASKS.md task 22).
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
   const scalars: HydratedScalars = {};
@@ -402,5 +413,30 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
     checks['nursing-plan'] = carePlan.description.split('; ').filter(Boolean);
   }
 
-  return { scalars, texts, chips, checks, checkTexts };
+  // ---- Medications table ----
+  // Row order must match the table's own columns (see the `medications-table`
+  // Grid in AdmissionHealthScreeningWizard.tsx): name, dose, frequency,
+  // reason, prescriber, last taken.
+  const medicationRows: string[][] = [];
+  for (const med of data.medications as MedicationStatement[]) {
+    const name = med.medicationCodeableConcept?.text;
+    if (!name) {
+      continue;
+    }
+    const { dose, frequency } = dosageToFields(med.dosage?.[0]);
+    const reason = med.reasonCode?.[0]?.text;
+    const prescriber = med.informationSource?.display;
+    const lastTakenMatch = /^Last taken: (.*)$/.exec(med.note?.[0]?.text ?? '');
+    medicationRows.push([
+      name,
+      dose ?? '',
+      frequency ?? '',
+      reason ?? '',
+      prescriber ?? '',
+      lastTakenMatch?.[1] ?? '',
+    ]);
+  }
+  const rows: Record<string, string[][]> = medicationRows.length > 0 ? { 'medications-table': medicationRows } : {};
+
+  return { scalars, texts, chips, checks, checkTexts, rows };
 }

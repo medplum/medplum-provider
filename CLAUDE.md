@@ -70,7 +70,14 @@ don't extrapolate from a green unit run.
   back. Filters out retracted findings and collapses legacy duplicates.
   Both `hydrateScreening.ts` (form read-back) and `DjsPatientSummary.tsx`
   (display) build on this — extend it, don't duplicate its search/filter
-  logic elsewhere.
+  logic elsewhere. Also home to `buildDosage()`/`dosageToFields()`
+  (task 17 step 6): the medications table's dose/frequency save into FHIR
+  `Dosage`'s own structured fields (`doseAndRate.doseQuantity`,
+  `timing.code.text`) rather than one merged string, specifically so save
+  and read-back share one definition of the mapping instead of each
+  re-deriving it. The drug name itself is still uncoded free text —
+  RxNorm mapping is tracked separately as task 22, since it needs a
+  drug-search/terminology source this form doesn't have.
 - `src/pages/hydrateScreening.ts` — `hydrateScreeningForm(data, patient)`:
   pure function, live resources → form values, for resuming a
   partially-completed screening. Kept pure and separately unit-tested

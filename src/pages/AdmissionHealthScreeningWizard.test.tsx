@@ -491,6 +491,72 @@ describe('AdmissionHealthScreeningWizard', () => {
     });
   });
 
+  describe('medication dosage (task 17 step 6 / Option A)', () => {
+    // Dose and frequency were previously concatenated into one
+    // `dosage[0].text` string ("5 mg, twice daily"), which is what made
+    // reading them back into two separate table columns lossy. They now save
+    // into Dosage's own structured fields — doseAndRate.doseQuantity for the
+    // dose, timing.code for the frequency — so there's nothing to un-merge.
+    test('saves dose and frequency into separate structured Dosage fields, not one merged string', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      const addMedication = screen.getByRole('button', { name: /add medication/i });
+      await user.click(addMedication);
+      const table = addMedication.previousElementSibling as HTMLElement;
+      const inputs = table.querySelectorAll<HTMLInputElement>('tbody tr td input');
+      await user.type(inputs[0], 'Albuterol');
+      await user.type(inputs[1], '2 mg');
+      await user.type(inputs[2], 'BID');
+      await saveSection(user, /save health status/i);
+
+      const med = capture.written.find((r) => r.resourceType === 'MedicationStatement') as
+        | { dosage?: { text?: string; timing?: { code?: { text?: string } }; doseAndRate?: { doseQuantity?: { value?: number; unit?: string; system?: string; code?: string } }[] }[] }
+        | undefined;
+
+      expect(med?.dosage?.[0].text).toBeUndefined();
+      expect(med?.dosage?.[0].timing?.code?.text).toBe('BID');
+      expect(med?.dosage?.[0].doseAndRate?.[0].doseQuantity).toEqual({
+        value: 2,
+        unit: 'mg',
+        system: 'http://unitsofmeasure.org',
+        code: 'mg',
+      });
+      expect(capture.validationErrors).toEqual([]);
+    });
+
+    test('a dose typed as free text (not "<number> <unit>") still saves, as Dosage.text, alongside its own frequency', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      const addMedication = screen.getByRole('button', { name: /add medication/i });
+      await user.click(addMedication);
+      const table = addMedication.previousElementSibling as HTMLElement;
+      const inputs = table.querySelectorAll<HTMLInputElement>('tbody tr td input');
+      await user.type(inputs[0], 'Ibuprofen');
+      await user.type(inputs[1], '1-2 tablets');
+      await user.type(inputs[2], 'as needed');
+      await saveSection(user, /save health status/i);
+
+      const med = capture.written.find((r) => r.resourceType === 'MedicationStatement') as
+        | { dosage?: { text?: string; timing?: { code?: { text?: string } }; doseAndRate?: unknown[] }[] }
+        | undefined;
+
+      expect(med?.dosage?.[0].text).toBe('1-2 tablets');
+      expect(med?.dosage?.[0].timing?.code?.text).toBe('as needed');
+      expect(med?.dosage?.[0].doseAndRate).toBeUndefined();
+      expect(capture.validationErrors).toEqual([]);
+    });
+  });
+
   describe('form read-back on mount', () => {
     // Task 10: opening an existing patient's screening must repopulate the
     // form, not show blank fields. This mounts the wizard at the patient route
@@ -733,6 +799,46 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(
         fieldTextarea('Health status alerts (document allergies on chart cover & problem list too)').value
       ).toBe('Watch for allergic reaction');
+    });
+
+    // Task 17 step 6 (Option A): dose and frequency are read back from
+    // Dosage's own structured fields (doseAndRate.doseQuantity, timing.code),
+    // not un-merged from one string — see hydrateScreening.test.ts for the
+    // unit-level coverage of dosageToFields itself.
+    test('populates the medications table on reopen, with dose and frequency independent of each other', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Kim' }] });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'MedicationStatement',
+        status: 'active',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'medication::Albuterol' }],
+        medicationCodeableConcept: { text: 'Albuterol' },
+        dosage: [
+          { doseAndRate: [{ doseQuantity: { value: 2, unit: 'mg' } }], timing: { code: { text: 'BID' } } },
+        ],
+        reasonCode: [{ text: 'Asthma' }],
+        informationSource: { display: 'Dr Chen' },
+        note: [{ text: 'Last taken: this morning' }],
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      const addMedication = screen.getByRole('button', { name: /add medication/i });
+      const table = addMedication.previousElementSibling as HTMLElement;
+      await waitFor(() => {
+        const inputs = table.querySelectorAll<HTMLInputElement>('tbody tr td input');
+        expect(inputs[0].value).toBe('Albuterol');
+        expect(inputs[1].value).toBe('2 mg');
+        expect(inputs[2].value).toBe('BID');
+        expect(inputs[3].value).toBe('Asthma');
+        expect(inputs[4].value).toBe('Dr Chen');
+        expect(inputs[5].value).toBe('this morning');
+      });
     });
   });
 

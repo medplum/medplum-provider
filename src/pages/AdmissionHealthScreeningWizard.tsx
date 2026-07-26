@@ -21,7 +21,7 @@ import { useFormState } from './formState';
 // each resource under this system's identifier (derived from the field that
 // produced it, so a re-save updates in place rather than duplicating), and the
 // summary/read-back loads it back by the same key.
-import { isScreeningRetracted, loadScreeningResources, SCREENING_ID_SYSTEM } from './screeningData';
+import { buildDosage, isScreeningRetracted, loadScreeningResources, SCREENING_ID_SYSTEM } from './screeningData';
 import { hydrateScreeningForm } from './hydrateScreening';
 
 /**
@@ -138,7 +138,7 @@ export function AdmissionHealthScreeningWizard({
       if (!active || !data) {
         return;
       }
-      const { scalars, texts, chips, checks, checkTexts } = hydrateScreeningForm(data, loaded);
+      const { scalars, texts, chips, checks, checkTexts, rows } = hydrateScreeningForm(data, loaded);
 
       if (scalars.lastName !== undefined) setLastName(scalars.lastName);
       if (scalars.firstName !== undefined) setFirstName(scalars.firstName);
@@ -173,6 +173,9 @@ export function AdmissionHealthScreeningWizard({
         for (const [item, text] of Object.entries(itemTexts)) {
           form.setCheckText(grid, item, text);
         }
+      }
+      for (const [table, tableRows] of Object.entries(rows)) {
+        form.setRows(table, tableRows);
       }
     })();
     return () => {
@@ -521,11 +524,13 @@ export function AdmissionHealthScreeningWizard({
       if (!name) continue;
       const key = `medication::${name}`;
       medicationKeys.add(key);
-      // Omit `dosage` entirely when there's nothing to put in it: an array
-      // holding an empty Dosage violates ele-1 ("all elements must have a
-      // value or children"), so a medication logged without a dose would be
-      // rejected outright.
-      const dosageText = [dosage, frequency].filter(Boolean).join(', ');
+      // Structured dose (doseAndRate.doseQuantity) + frequency (timing.code)
+      // rather than one merged string — see `buildDosage` for why. Omitted
+      // entirely when there's nothing to put in it: an array holding an
+      // empty Dosage violates ele-1 ("all elements must have a value or
+      // children"), so a medication logged without a dose would be rejected
+      // outright.
+      const builtDosage = buildDosage(dosage, frequency);
       await medplum.upsertResource(
         {
           resourceType: 'MedicationStatement',
@@ -533,7 +538,7 @@ export function AdmissionHealthScreeningWizard({
           subject,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           medicationCodeableConcept: { text: name },
-          dosage: dosageText ? [{ text: dosageText }] : undefined,
+          dosage: builtDosage ? [builtDosage] : undefined,
           reasonCode: reason ? [{ text: reason }] : undefined,
           informationSource: prescriber ? { display: prescriber } : undefined,
           note: lastTaken ? [{ text: `Last taken: ${lastTaken}` }] : undefined,

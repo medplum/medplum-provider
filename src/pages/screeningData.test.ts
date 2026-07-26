@@ -4,7 +4,7 @@ import type { WithId } from '@medplum/core';
 import type { Patient, Resource } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { loadScreeningResources, SCREENING_ID_SYSTEM } from './screeningData';
+import { buildDosage, dosageToFields, loadScreeningResources, parseDoseQuantity, SCREENING_ID_SYSTEM } from './screeningData';
 
 function screeningId(value: string): { system: string; value: string }[] {
   return [{ system: SCREENING_ID_SYSTEM, value }];
@@ -136,5 +136,70 @@ describe('loadScreeningResources', () => {
     expect(data.medications).toEqual([]);
     expect(data.carePlans).toEqual([]);
     expect(data.byKey.size).toBe(0);
+  });
+});
+
+describe('parseDoseQuantity', () => {
+  test('splits a bare "<number> <unit>" dose', () => {
+    expect(parseDoseQuantity('5 mg')).toEqual({ value: 5, unit: 'mg' });
+    expect(parseDoseQuantity('2.5mg')).toEqual({ value: 2.5, unit: 'mg' });
+  });
+
+  test('returns undefined for shapes that are not a bare number+unit', () => {
+    expect(parseDoseQuantity('1-2 tablets')).toBeUndefined();
+    expect(parseDoseQuantity('as directed')).toBeUndefined();
+    expect(parseDoseQuantity('')).toBeUndefined();
+  });
+});
+
+describe('buildDosage (task 17 step 6 / Option A: structured dose + frequency, not one merged string)', () => {
+  test('a recognized unit gets a coded doseQuantity (UCUM) plus separate timing', () => {
+    const dosage = buildDosage('5 mg', 'twice daily');
+    expect(dosage).toEqual({
+      timing: { code: { text: 'twice daily' } },
+      doseAndRate: [
+        { doseQuantity: { value: 5, unit: 'mg', system: 'http://unitsofmeasure.org', code: 'mg' } },
+      ],
+    });
+  });
+
+  test('an unrecognized unit still saves as a Quantity, just without a coded system/code', () => {
+    const dosage = buildDosage('2 puffs', undefined);
+    expect(dosage).toEqual({ doseAndRate: [{ doseQuantity: { value: 2, unit: 'puffs' } }] });
+  });
+
+  test('a dose that is not "<number> <unit>" falls back to Dosage.text, independent of frequency', () => {
+    const dosage = buildDosage('1-2 tablets', 'as needed');
+    expect(dosage).toEqual({ text: '1-2 tablets', timing: { code: { text: 'as needed' } } });
+  });
+
+  test('frequency alone (no dose) is still recorded', () => {
+    expect(buildDosage(undefined, 'nightly')).toEqual({ timing: { code: { text: 'nightly' } } });
+  });
+
+  test('nothing entered returns undefined rather than an empty Dosage (ele-1)', () => {
+    expect(buildDosage(undefined, undefined)).toBeUndefined();
+    expect(buildDosage('', '')).toBeUndefined();
+  });
+});
+
+describe('dosageToFields (inverse of buildDosage)', () => {
+  test('round-trips a coded dose + frequency', () => {
+    expect(dosageToFields(buildDosage('5 mg', 'twice daily'))).toEqual({ dose: '5 mg', frequency: 'twice daily' });
+  });
+
+  test('round-trips an unrecognized-unit dose', () => {
+    expect(dosageToFields(buildDosage('2 puffs', undefined))).toEqual({ dose: '2 puffs', frequency: undefined });
+  });
+
+  test('round-trips a fallback-text dose alongside its own separate frequency', () => {
+    expect(dosageToFields(buildDosage('1-2 tablets', 'as needed'))).toEqual({
+      dose: '1-2 tablets',
+      frequency: 'as needed',
+    });
+  });
+
+  test('returns an empty object for an undefined Dosage', () => {
+    expect(dosageToFields(undefined)).toEqual({});
   });
 });

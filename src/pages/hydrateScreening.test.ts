@@ -4,6 +4,7 @@ import type {
   AllergyIntolerance,
   CarePlan,
   Condition,
+  MedicationStatement,
   Observation,
   Patient,
 } from '@medplum/fhirtypes';
@@ -436,6 +437,7 @@ describe('hydrateScreeningForm', () => {
     expect(result.chips).toEqual({});
     expect(result.checks).toEqual({});
     expect(result.checkTexts).toEqual({});
+    expect(result.rows).toEqual({});
   });
 
   describe('"Other:" free text (task 17 step 3)', () => {
@@ -504,6 +506,66 @@ describe('hydrateScreeningForm', () => {
 
       expect(checks['chronic-list']).toEqual(['Other']);
       expect(checkTexts['chronic-list']).toEqual({ Other: 'Ehlers-Danlos syndrome' });
+    });
+  });
+
+  describe('medications table (task 17 step 6)', () => {
+    function med(extra: Partial<MedicationStatement>): MedicationStatement {
+      return {
+        resourceType: 'MedicationStatement',
+        status: 'active',
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: `medication::${extra.medicationCodeableConcept?.text}` }],
+        ...extra,
+      } as MedicationStatement;
+    }
+
+    test('reads dose and frequency back from their own structured Dosage fields, not a merged string', () => {
+      const data = empty();
+      data.medications = [
+        med({
+          medicationCodeableConcept: { text: 'Albuterol' },
+          dosage: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: 'mg' } }], timing: { code: { text: 'BID' } } }],
+          reasonCode: [{ text: 'Asthma' }],
+          informationSource: { display: 'Dr Chen' },
+          note: [{ text: 'Last taken: this morning' }],
+        }),
+      ];
+
+      const { rows } = hydrateScreeningForm(data, undefined);
+
+      expect(rows['medications-table']).toEqual([
+        ['Albuterol', '2 mg', 'BID', 'Asthma', 'Dr Chen', 'this morning'],
+      ]);
+    });
+
+    test('falls back to Dosage.text for a dose that is not a bare "<number> <unit>" (e.g. "1-2 tablets")', () => {
+      const data = empty();
+      data.medications = [
+        med({
+          medicationCodeableConcept: { text: 'Ibuprofen' },
+          dosage: [{ text: '1-2 tablets', timing: { code: { text: 'as needed' } } }],
+        }),
+      ];
+
+      const { rows } = hydrateScreeningForm(data, undefined);
+
+      expect(rows['medications-table']).toEqual([['Ibuprofen', '1-2 tablets', 'as needed', '', '', '']]);
+    });
+
+    test('recovers a coded UCUM unit and an uncoded one identically as text', () => {
+      const data = empty();
+      data.medications = [
+        med({ medicationCodeableConcept: { text: 'Melatonin' }, dosage: [{ text: '1 tablet' }] }),
+      ];
+
+      const { rows } = hydrateScreeningForm(data, undefined);
+
+      expect(rows['medications-table']).toEqual([['Melatonin', '1 tablet', '', '', '', '']]);
+    });
+
+    test('omits `rows` entirely when there are no medications', () => {
+      const { rows } = hydrateScreeningForm(empty(), undefined);
+      expect(rows['medications-table']).toBeUndefined();
     });
   });
 });

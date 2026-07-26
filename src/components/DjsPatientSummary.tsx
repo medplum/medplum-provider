@@ -6,7 +6,7 @@ import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import '../theme/tokens.css';
-import { loadScreeningResources, screeningKey, type ScreeningResources } from '../pages/screeningData';
+import { dosageToFields, loadScreeningResources, screeningKey, type ScreeningResources } from '../pages/screeningData';
 
 /** Vitals to show, in display order, keyed by the Observation code the wizard writes. */
 const VITALS: { code: string; label: string }[] = [
@@ -49,8 +49,9 @@ function conditionsWithPrefix(data: ScreeningResources, prefix: string): Conditi
 
 function medicationLabel(med: MedicationStatement): string {
   const name = med.medicationCodeableConcept?.text ?? 'Medication';
-  const dose = med.dosage?.[0]?.text;
-  return dose ? `${name} — ${dose}` : name;
+  const { dose, frequency } = dosageToFields(med.dosage?.[0]);
+  const doseText = [dose, frequency].filter(Boolean).join(', ');
+  return doseText ? `${name} — ${doseText}` : name;
 }
 
 const labelStyle: React.CSSProperties = {

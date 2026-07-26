@@ -94,7 +94,7 @@ a search query from one of these item names without going through
 `screeningData.ts` (alongside `SCREENING_ID_SYSTEM`) so future write paths
 can't forget it.
 
-### Task 17 — extend form read-back to the remaining fields
+### Task 17 — extend form read-back to the remaining fields — **DONE**, all 8 steps
 
 Reopening a patient's screening repopulates most of the form
 (`hydrateScreeningForm` in `hydrateScreening.ts`), via the `HydratedScalars`
@@ -141,13 +141,25 @@ Suggested order, easiest/highest-value first:
    "no detail typed" with a literal "Yes" value, so read-back mirrors that
    same imprecision rather than pretending to resolve it.
 
-6. **Medications** (lossiest — do last). `dosage`+`frequency` are merged
-   into one string on save (`[dosage, frequency].filter(Boolean).join(', ')`
-   in `saveVitals`). Reconstructing the medications table means either (a)
-   accepting the lossy merge and putting the whole string in one column,
-   leaving the other blank, or (b) leaving medications un-resumable and
-   documenting that explicitly. Needs a product call, not just code — flag
-   this one for a decision rather than guessing an approach.
+6. **Medications** — **DONE**, Option A (structured `Dosage`, no RxNorm yet).
+   Resolved the product question by anchoring in the FHIR `Dosage` datatype
+   instead of working around the merge: dose now saves as
+   `doseAndRate[0].doseQuantity` (with a UCUM `system`/`code` for recognized
+   units — mg/g/kg/mcg/ml/l — else just `Quantity.unit` as display text) and
+   frequency as `timing.code.text`, via `buildDosage()`/`dosageToFields()` in
+   `screeningData.ts`. A dose that isn't a bare `<number> <unit>` (e.g.
+   "1-2 tablets") falls back to `Dosage.text`, but *only* the dose — frequency
+   still lives in its own `timing` field, so nothing is lossy across the two
+   columns anymore, unlike the old merged-string approach. The drug name
+   itself (`medicationCodeableConcept.text`) is still uncoded free text;
+   mapping it to RxNorm needs a drug-search/terminology source this form
+   doesn't have, so it's tracked separately as task 22, not folded in here.
+   Read-back added a `rows` bucket to `HydratedForm` (medications is a table,
+   not scalar fields). Unit tests in `screeningData.test.ts` (dose
+   parsing/building/round-trip) and `hydrateScreening.test.ts` (table
+   read-back), plus integration + persistence tests in
+   `AdmissionHealthScreeningWizard.test.tsx`; mutation-verified against the
+   old merged-string behavior.
 
 7. **Sign-off** — **DONE** (`7d8e81b`). Same parse-the-formatted-string
    approach as `VISION_EXAM_CODE`; the `—` placeholder for an unfilled
@@ -158,17 +170,51 @@ Suggested order, easiest/highest-value first:
    empty" state to handle, unlike glasses-history); RN initials parsed from
    the note.
 
-**Task 17 is now complete except step 6 (medications), paused pending a
-product decision — not a code question.**
+### Task 20 — audit other search paths for the comma hazard (still open)
 
-For every step: the wiring is already in place (the mount effect in
-`AdmissionHealthScreeningWizard.tsx` applies whatever `hydrateScreeningForm`
-returns — no changes needed there), so each step is purely: add a mapping
-in `hydrateScreening.ts`, add a unit test in `hydrateScreening.test.ts`
-following the existing test patterns (see e.g. the "Last vision exam"
-parse test already there), then run `npx vitest run
-src/pages/hydrateScreening.test.ts` and the field-integrity test to confirm
-nothing regressed.
+Logged above when task 19 fixed the disposition-notes comma-duplication
+bug. Not yet done: sweep the rest of `AdmissionHealthScreeningWizard.tsx`
+for any other identifier/search-token construction that bypasses
+`escapeSearchToken`, and consider promoting that helper into
+`screeningData.ts` as a shared export so future write paths can't forget
+it (it currently lives local to the wizard file).
+
+### Task 22 — map medication drug names to RxNorm (open, follow-on from task 17 step 6)
+
+Task 17 step 6 anchored *dose/frequency* in FHIR's `Dosage` datatype
+(structured `doseAndRate`/`timing`, UCUM units where recognized — see
+below) but deliberately left the *drug name itself* as free text
+(`medicationCodeableConcept.text`, no `coding`). Coding it against RxNorm
+(the US clinical-drug terminology SureScripts/DoseSpot use) needs a
+drug-search/lookup UI this form doesn't have — a real feature, not a
+read-back-sized change. Do this before task 23.
+
+### Task 23 — integrate prescribing/orders: MedicationRequest + DoseSpot (open, blocked on task 22)
+
+The wizard's medication section is medication *reconciliation/history* —
+correctly modeled as `MedicationStatement`. Actual *prescribing* is a
+different FHIR resource, `MedicationRequest` (with `dosageInstruction`),
+which is what Medplum's DoseSpot e-prescribing integration produces
+(embedded iframe, RxNorm-coded drugs, transmitted via SureScripts — see
+https://www.medplum.com/docs/integration/dosespot, though that page
+documents the iframe/feature surface, not the FHIR resource shapes).
+When DJS needs to actually write orders, build a `MedicationRequest`-based
+flow and evaluate DoseSpot as the e-prescribing path.
+
+**Task 17 is now fully complete — all 8 steps done.** Step 6 (medications)
+was the one paused pending a product decision; resolved by anchoring in
+FHIR's `Dosage` datatype (Option A — see step 6 above) rather than
+guessing at a workaround. `HydratedForm` grew a `rows` bucket to carry it,
+since medications is a table, not scalar fields — the mount effect in
+`AdmissionHealthScreeningWizard.tsx` applies it via `form.setRows()`.
+
+For the fields that were still scalar/checklist mappings: the wiring is
+already in place (the mount effect applies whatever `hydrateScreeningForm`
+returns), so each step was purely: add a mapping in `hydrateScreening.ts`,
+add a unit test in `hydrateScreening.test.ts` following the existing test
+patterns (see e.g. the "Last vision exam" parse test already there), then
+run `npx vitest run src/pages/hydrateScreening.test.ts` and the
+field-integrity test to confirm nothing regressed.
 
 **Do NOT re-derive the exact `code.text` strings by memory** — grep each
 one out of `AdmissionHealthScreeningWizard.tsx` before writing the mapping,
@@ -183,7 +229,10 @@ since a typo'd code string will silently match nothing rather than error.
   custody) beyond default patient-record visibility. The retraction model
   keeps an audit trail; access control is separate and unbuilt.
 - **Coded terminology.** Most fields save free-text `CodeableConcept.text`
-  rather than SNOMED/LOINC/RxNorm codes.
+  rather than SNOMED/LOINC/RxNorm codes. Medication dose/frequency were
+  pulled out of this bucket by task 17 step 6 (now structured `Dosage`
+  fields, UCUM-coded where recognized); the medication *name* itself is
+  still free text — see task 22.
 - **Field validation.** No required-field or range checks anywhere (vitals
   ranges, date sanity, etc.).
 - **Pull the wizard out of the AppShell.** It currently draws its own
