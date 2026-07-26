@@ -57,27 +57,110 @@ requirement on Medplum.
 
 ## Open
 
+### Task 19 — save `disposition-notes` / `signoff-datetime` / `review-date` (data loss) — **do first**
+
+Found while scoping task 17: three fields in `saveDiagnosisDisposition`'s
+JSX (`AdmissionHealthScreeningWizard.tsx`, Sign-off/Nursing-plan cards,
+~line 1003–1012) are rendered via `form.text('disposition-notes'
+/'signoff-datetime'/'review-date')` but **read by no save handler** —
+same silent-data-loss class as task 18 (epipen, chronic-providers).
+Confirmed by reading `saveDiagnosisDisposition` (~line 676): it only reads
+`dx1`–`dx4`, `nursing-plan`, `nurse-signature`, `physician-signature`,
+`health-alerts`.
+
+Fix the same way task 18 did: add each as an `obs()`/`saveObservationSet`
+write in `saveDiagnosisDisposition`, with its own stable `code.text` (so it
+gets upsert + retraction like everything else), then a focused test that
+fills all three via the UI and asserts the Observations exist — the
+field-integrity grep **cannot** catch this class (a JSX `value=` read
+counts as a read to it).
+
+**This blocks half of task 17 below** — read-back can't restore a field
+that was never persisted. Do this one first.
+
 ### Task 17 — extend form read-back to the remaining fields
 
 Reopening a patient's screening repopulates most of the form
-(`hydrateScreeningForm` in `hydrateScreening.ts`), but a few fields still
-come back blank because their stored form is lossy to reverse, or they
-were never mapped:
+(`hydrateScreeningForm` in `hydrateScreening.ts`), via the `HydratedScalars`
+interface + `VITAL_CODE_TO_FIELD`/`CHECKLIST_CODE_TO_GRID` lookup tables
+already there. A few fields still come back blank — either because they're
+lossy to reverse, weren't mapped yet, or (task 19) aren't saved yet.
+Suggested order, easiest/highest-value first:
 
-- **Medications** — `dosage`+`frequency` are merged into one string on
-  save; splitting them back into the table's two columns is lossy.
-- **Sign-off** — a formatted `valueString` (`Nurse: X; Physician: Y`) plus
-  health-alerts in a note.
-- **Mandated-reporter** checkbox + RN initials.
-- **Extra demographics** — hair/eye colour, race, needs-interpreter,
-  birthplace, ethnicity chip, the 6-cell vision-acuity grid.
-- **`Other::` free text** on checklist items.
-- **The four task-18 free-text fields** (chronic providers/PCP/comments,
-  injuries detail) — they save correctly now, just aren't read back yet.
+1. **The four task-18 free-text fields** — `chronic-providers`,
+   `chronic-pcp`, `chronic-comments`, `injuries-detail`. These already save
+   as plain Observations with a fixed `code.text` (see task 18's commit
+   `abd1961` for the exact codes: `'Doctors/specialists managing chronic
+   conditions'`, `'Primary care provider'`, `'Chronic conditions:
+   additional comments'`, `'Injuries/trauma: details'`). Trivial
+   `valueString` → `texts['chronic-providers']` etc. mappings, same pattern
+   as the existing `DENTAL_EXAM`/`ROS_COMMENTS` entries in
+   `hydrateScreening.ts`. Do these first — no ambiguity, fastest win.
 
-The wiring is already in place — the mount effect applies whatever
-`hydrateScreeningForm` returns — so each of these is a mapping function
-plus a unit test, following the existing pattern in that file.
+2. **The three task-19 fields**, once task 19 lands and their `code.text`
+   values are fixed — same trivial mapping as above.
+
+3. **`Other::` free text on checklist items.** Currently `hydrateScreeningForm`
+   restores the checkbox toggle (`checks[grid]`) from the identifier suffix,
+   but not the typed-in text next to "Other" — that lives only in the
+   Observation's `code.text`/`valueString` (see `saveReviewOfSystems` /
+   `saveAllergiesChronic`: `checkTextMap(grid)[item] || item` is what gets
+   written, keyed by the *original* item name via the identifier suffix, not
+   the typed text). To restore it: for a checklist item whose stored value
+   differs from its own key name, that stored value **is** the free text —
+   write it into `checkTextMap`/`form.setCheckText(grid, item, text)`
+   alongside toggling the checkbox. Needs a test seeding an "Other: <text>"
+   Observation and asserting both the checkbox and the text field come back.
+
+4. **Extra demographics from `Patient.extension`** — race
+   (`us-core-race`), ethnicity/hispanic (`us-core-ethnicity`),
+   needs-interpreter (informal `needs-interpreter` extension), birthplace
+   (`patient-birthPlace`). All read off `patient.extension` in
+   `savePatientRecord` (~line 375–392) with known URLs — grep those URLs to
+   confirm before mapping. Hair/eye colour are **not** extensions, they're
+   plain Observations (`'Hair color'`/`'Eye color'` codes) — check whether
+   those two are already mapped in `hydrateScreeningForm` before
+   re-adding them (they may already be covered as generic Observations;
+   confirm with the field list at the top of `hydrateScreening.ts` first).
+
+5. **Vision-acuity grid (6 fields)** — `vision-nocorr-left/right/both`,
+   `vision-corr-left/right/both`. Already saved as 6 separate Observations
+   in `saveVitals`'s `visionFields` loop with fixed labels ("Visual acuity,
+   left eye, without correction", etc. — see that array in the source for
+   the exact 6 strings). Straightforward `valueString` → `texts[key]`
+   mapping, one entry per field, no parsing needed.
+
+6. **Medications** (lossiest — do last). `dosage`+`frequency` are merged
+   into one string on save (`[dosage, frequency].filter(Boolean).join(', ')`
+   in `saveVitals`). Reconstructing the medications table means either (a)
+   accepting the lossy merge and putting the whole string in one column,
+   leaving the other blank, or (b) leaving medications un-resumable and
+   documenting that explicitly. Needs a product call, not just code — flag
+   this one for a decision rather than guessing an approach.
+
+7. **Sign-off** — `valueString: "Nurse: X; Physician: Y"` plus
+   `health-alerts` in a `note`. Same parse-the-formatted-string approach
+   already used for `'Last vision exam'` in `hydrateScreeningForm` (see the
+   `Date: ..., provider: ...` regex there) — write a similar regex for
+   `Nurse: (.*); Physician: (.*)`, then note → `health-alerts`.
+
+8. **Mandated-reporter** checkbox + RN initials. Saved as one Observation
+   (`'Mandated reporter statement read to youth'`) with the initials in a
+   `note` (`RN initials: ${initials}`) — presence of the Observation means
+   the checkbox was checked; parse the note for the initials.
+
+For every step: the wiring is already in place (the mount effect in
+`AdmissionHealthScreeningWizard.tsx` applies whatever `hydrateScreeningForm`
+returns — no changes needed there), so each step is purely: add a mapping
+in `hydrateScreening.ts`, add a unit test in `hydrateScreening.test.ts`
+following the existing test patterns (see e.g. the "Last vision exam"
+parse test already there), then run `npx vitest run
+src/pages/hydrateScreening.test.ts` and the field-integrity test to confirm
+nothing regressed.
+
+**Do NOT re-derive the exact `code.text` strings by memory** — grep each
+one out of `AdmissionHealthScreeningWizard.tsx` before writing the mapping,
+since a typo'd code string will silently match nothing rather than error.
 
 ---
 
