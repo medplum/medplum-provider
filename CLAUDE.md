@@ -2,17 +2,21 @@
 
 Reference for working on the Maryland DJS admission screening wizard
 inside this `medplum-provider` checkout. Read this before touching a save
-handler — it's the invariants and gotchas that aren't obvious from the
-code. For what's still open, see `TASKS.md`.
+handler — it's the invariants, gotchas, and platform findings that aren't
+obvious from the code. For what's still open, see `TASKS.md`.
 
 ## What this is
 
 Maryland DJS's "Admission Health Screening and Nursing Assessment" paper
-form, as a Medplum-backed React wizard. **4 sections**: Patient
-Information → Current Health Status → Review of Systems → Diagnosis &
-Disposition. Originally 9 sections; Skin/Body Exam, Abuse/Substance/Family
-History, and Reproductive Health were cut and are **not coming back** — if
-you find code referencing them, it's debris.
+form, as a Medplum-backed React wizard, and — just as importantly — a
+working prototype for **evaluating whether Medplum is a viable platform**
+for this agency. Bugs and platform limitations found here are the point,
+not a distraction from it; see "Platform findings" below.
+
+**4 sections**: Patient Information → Current Health Status → Review of
+Systems → Diagnosis & Disposition. Originally 9; Skin/Body Exam,
+Abuse/Substance/Family History, and Reproductive Health were cut and are
+**not coming back** — if you find code referencing them, it's debris.
 
 ## Running it
 
@@ -42,10 +46,14 @@ server via client-credentials login — no `MockClient`. Requires:
    `MEDPLUM_LIVE_BASE_URL` (defaults to `http://localhost:8103/`).
 
 Without those two env vars the whole file skips — `npm test` and a
-credential-less `npm run test:live` both stay green. **This is the only
-way to catch the bug class below marked "live-only"** — write it a live
-test rather than trusting the unit suite for anything MockClient might
-fake.
+credential-less `npm run test:live` both stay green.
+
+**This suite exists because `MockClient` lies about server behavior in
+both directions** — it enforces things the real server doesn't (nothing),
+and permits things the real server rejects (nothing validated). Every
+platform finding below was caught here, not in the unit suite. If you're
+unsure whether a fix actually works against Medplum, write a live test —
+don't extrapolate from a green unit run.
 
 ## Architecture
 
@@ -97,20 +105,14 @@ drift from the resource it labels. If you add a field, its `code.text`
 must be unique across the file; a collision silently overwrites one field
 with another.
 
-**Each section's save handler builds a `ScreeningBundle` and commits it
-once** via `medplum.executeBatch({ type: 'transaction', ... })` — atomic
-on a real server, so a failure part-way leaves the section wholly
-unwritten rather than half-persisted. `obs()` and `bundleUpsert()` append
-entries to the bundle instead of writing immediately; the section's
-`onClick` handler creates the bundle, calls the save functions, then
-`commitBundle()`s once. Only the Patient upsert (which must resolve first,
-to yield the subject reference) and retraction reads/writes happen outside
-the bundle.
+**Writes are sequential conditional upserts** — `medplum.upsertResource`
+(`PUT` with a search query), never plain `create`. Idempotent and
+concurrency-safe: re-saving a section updates in place rather than
+duplicating, and a save interrupted partway through can simply be redone —
+already-written fields upsert to the same result, nothing doubles.
 
-**Writes are conditional upserts** (`PUT` with a search URL — same
-mechanism `bundleUpsert` uses inside the bundle, or `medplum.upsertResource`
-directly for the Patient), never plain `create`. Idempotent and
-concurrency-safe.
+This is deliberately **not** batched into a single transaction Bundle —
+see "Platform findings" for why that was tried and reverted.
 
 **`retractStale(resourceType, subject, inScope, liveKeys, param?)`**
 withdraws resources the form no longer asserts — unchecking an item must
@@ -118,8 +120,6 @@ withdraw its resource, not leave it asserted while the form shows it gone.
 Retraction is `status: 'entered-in-error'` for Observation/
 MedicationStatement, `verificationStatus: entered-in-error` for
 Condition/AllergyIntolerance. **Never hard-delete clinical data.**
-Retractions are applied as **direct** `updateResource` calls, deliberately
-**outside** the section's bundle — see "Bug classes" for why.
 
 The `inScope` predicate is load-bearing: without it, saving one section
 retracts every other section's findings, since none of their keys appear
@@ -136,11 +136,54 @@ state read directly inside a save handler — see "Bug classes."
 **`runSave(key, message, fn)`** wraps each button with a pending state and
 success/error toasts. Never fire a save handler bare from `onClick`.
 
-## Bug classes that have bitten here — don't reintroduce
+## Platform findings (Medplum evaluation)
 
-These are patterns, not one-off fixes — the same shape has recurred
-across different fields and sections. If you're touching a save handler,
-check against this list.
+Things learned about Medplum itself, not just this codebase — relevant if
+anyone revisits transaction bundles, or is deciding how much to trust this
+platform for similar work.
+
+**`executeBatch` with `type: "transaction"` is not atomic on this server
+(Medplum 5.1.27).** Task 9 tried batching each section's writes into one
+transaction Bundle so a mid-save failure would leave nothing persisted. A
+live test submitted a bundle with one valid Observation and one
+`ait-1`-violating AllergyIntolerance: the server returned a
+`transaction-response` with the valid entry at `201 Created` (real id,
+`meta.versionId`, fully persisted) and the invalid entry at `400` —
+**`executeBatch` resolved rather than rejecting.** FHIR permits a server to
+treat `transaction` as effectively best-effort; this one does. **There is
+no way to get atomic multi-resource writes from this server via
+`executeBatch`** — not a client-code problem, a platform ceiling. Reverted
+in full (`7e213fc`); the mitigation already in place (idempotent upserts,
+so a partial save self-heals on retry) is what this prototype relies on
+instead.
+
+**A resource created inside a transaction Bundle isn't immediately
+searchable.** While bundles were still in use, a live test created an
+AllergyIntolerance via a bundle conditional-PUT, then searched for it
+moments later in the same flow — the search matched (proven separately in
+the test), but `retractStale`'s own equivalent search returned 0 results
+within the actual save flow. Apparent index lag specific to bundle-written
+resources. This silently broke retraction on the real server while every
+unit test stayed green (`MockClient` doesn't reproduce the lag). If bundles
+are ever reattempted, budget for this — a bundle write may need a delay or
+a different confirmation strategy before anything downstream searches for
+what it just wrote.
+
+**`MockClient` does not enforce FHIR invariants.** It stores a
+constraint-violating resource (missing required `clinicalStatus`, etc.)
+without complaint. The unit suite's `captureWrites` + `validateResource`
+harness (below) catches this class offline by re-running the same
+validation the server does — but that's a workaround for a mock gap, not
+proof the server accepts it. Confirmed acceptance only comes from the live
+suite.
+
+**A bare `identifier=<system>|` search (system, empty value) behaves
+differently.** `MockClient` matches it; the live server returns nothing for
+it. Never narrow a search this way — fetch by patient/subject and filter
+the identifier system client-side instead (see `screeningData.ts`,
+`retractStale`).
+
+## Bug classes that have bitten here — don't reintroduce
 
 **Stale closure for the subject reference.** Reading `patient` state right
 after `setPatient()` gets the *pre-update* value — `setState` doesn't
@@ -169,32 +212,10 @@ value that could mean either thing.
 **Trailing `|` in a `Grid` items string** parses into a blank, labelless
 checkbox — always double-check hand-edited item strings.
 
-**Live-only bugs: things `MockClient` cannot catch.** Two real
-server-rejected writes passed the entire unit suite and only surfaced
-against a real server:
-- A bare `identifier=<system>|` search (system, empty value) — `MockClient`
-  matches it, the live server returns nothing. Never narrow a search with
-  an empty-value token; fetch by patient/subject and filter the identifier
-  system client-side instead (see `screeningData.ts`, `retractStale`).
-- A retracted `AllergyIntolerance`/`Condition` keeping `clinicalStatus` set
-  alongside `verificationStatus: entered-in-error` — violates FHIR
-  constraints `ait-2`/`con-5`. `clinicalStatus` must be **removed**, not
-  just left in place, when retracting those two types.
-
-  General lesson: **`MockClient` does not enforce FHIR invariants or
-  transaction atomicity.** It will store a constraint-violating resource
-  without complaint, and a bundle with one bad entry partial-commits
-  instead of rolling back. The unit suite's `captureWrites` +
-  `validateResource` (below) catches the constraint class offline; the
-  atomicity property and any raw-search behavior can *only* be proven by
-  the live suite. If you're unsure whether a fix actually works, write a
-  live test — don't extrapolate from a green unit run.
-
-- Also: a resource **created inside a transaction bundle** is not reliably
-  found by a later `searchResources` call within the same `MockClient`
-  session/component flow. If a unit test needs to seed "a resource from a
-  prior save," seed it with a direct `createResource`, not a bundle — see
-  the retraction round-trip test for the pattern.
+**A retracted `AllergyIntolerance`/`Condition` keeping `clinicalStatus`
+set** alongside `verificationStatus: entered-in-error` violates FHIR
+constraints `ait-2`/`con-5`. `clinicalStatus` must be **removed**, not just
+left in place, when retracting those two types.
 
 ## Verifying a change
 
@@ -240,13 +261,12 @@ grep -oE "code: \{ text: '[^']+'" src/pages/AdmissionHealthScreeningWizard.tsx \
 not validate FHIR constraints on write, so a test that only checks "didn't
 throw" misses the whole `ait-1`/`ait-2`/`con-3`/`con-5`/`ele-1` class.
 `AdmissionHealthScreeningWizard.test.tsx`'s `captureWrites(medplum)` wraps
-every write (including bundle entries) and runs it through
-`validateResource` from `@medplum/core`, which reproduces the server's
-constraint errors exactly. Any new resource-producing code should be
-driven through a test asserting `capture.validationErrors` is empty. When
-you add a check like this, **mutation-verify it once** — break the code on
-purpose and confirm the test goes red with the real error text — before
-trusting it as a guard.
+every write and runs it through `validateResource` from `@medplum/core`,
+which reproduces the server's constraint errors exactly. Any new
+resource-producing code should be driven through a test asserting
+`capture.validationErrors` is empty. When you add a check like this,
+**mutation-verify it once** — break the code on purpose and confirm the
+test goes red with the real error text — before trusting it as a guard.
 
 Then: `npm run build` (type-checks tests too), `npm test`, and — for
 anything touching the write path — `npm run test:live` if you have a

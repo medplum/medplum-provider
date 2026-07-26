@@ -1,8 +1,10 @@
 # DJS Admission Screening — task plan
 
 **Target:** a demo that *really saves* — a real Medplum project, real FHIR
-writes, no duplicate-on-resave. Not a clickable mockup; not yet
-pilot-ready (no AccessPolicy, no coded terminology, no field validation).
+writes, no duplicate-on-resave — and along the way, a real answer to
+whether Medplum is a viable platform for this agency. Not a clickable
+mockup; not yet pilot-ready (no AccessPolicy, no coded terminology, no
+field validation).
 
 **Standing priority:** function over appearance. UI polish (pulling the
 wizard out of the AppShell, its own chrome) is explicitly deprioritised
@@ -17,8 +19,8 @@ mention, not a narrative.
 ## Current state
 
 The full data path is built and tested: save → no-duplicate (conditional
-upsert) → retract-on-uncheck → resume-on-reopen (read-back) → display
-(patient-page summary) → atomic-per-section (transaction bundles).
+upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
+(read-back) → display (patient-page summary).
 
 - **50 DJS unit tests** (`npm test`) — MockClient only, no network. Covers
   FHIR constraint validity (mutation-verified against `ait-1`/`con-3`/
@@ -27,30 +29,35 @@ upsert) → retract-on-uncheck → resume-on-reopen (read-back) → display
   integrity. Stable across repeated runs.
 - **Live suite** (`npm run test:live`, needs a real Medplum server + a
   `ClientApplication`'s id/secret — see `CLAUDE.md`) — idempotency,
-  constraint acceptance, retraction round-trip, and transaction atomicity.
-  The live suite has twice caught real server-only bugs the unit suite
-  couldn't (a search form MockClient fakes but the server doesn't honor;
-  a retraction that violated `ait-2`/`con-5`) — both fixed. **Confirm this
-  suite is green before trusting the bundle refactor (below) is done.**
+  constraint acceptance, and retraction round-trip, all green against a
+  real server. This suite has repeatedly caught real server-only bugs the
+  unit suite couldn't (a search form `MockClient` fakes but the server
+  doesn't honor; a retraction that violated `ait-2`/`con-5`; the
+  transaction-atomicity finding below) — treat it as the actual proof of
+  anything touching the write path.
 - Parent-package test suite: 9 pre-existing failing files (a Vitest/ESM
   `vi.spyOn`-on-module-export limitation, unrelated to DJS code) — not
   ours to fix, don't be alarmed if the count doesn't change.
+
+## Platform finding: transaction Bundles aren't atomic here
+
+**Closed, not pursued further — this is a Medplum platform ceiling, not an
+open task.** Batching each section's writes into one FHIR `transaction`
+Bundle (so a mid-save failure leaves nothing persisted) was implemented
+and reverted after live testing showed this Medplum server (5.1.27) does
+not roll a transaction Bundle back when one entry fails — it partial-
+commits and `executeBatch` resolves rather than rejecting. Full detail and
+the reasoning in `CLAUDE.md` → "Platform findings". Current mitigation:
+every write is an idempotent conditional upsert, so a partial save
+self-heals on the next save — good enough for this prototype's purposes,
+but worth knowing if real cross-resource atomicity is ever a hard
+requirement on Medplum.
 
 ---
 
 ## Open
 
-### 1. Confirm task 9 (transaction bundles) against the live server
-
-Each section's save now batches into one FHIR transaction Bundle instead
-of N sequential writes, so a mid-save failure should leave the section
-wholly unwritten rather than half-persisted. This is implemented and unit
-tests pass, but **`MockClient` cannot verify transaction atomicity** (it
-partial-commits on a bad entry) — only a live run against a real server
-proves it. Run `npm run test:live`; if the atomicity test or any other
-live test fails, that's a real finding, not a fluke.
-
-### 2. Task 17 — extend form read-back to the remaining fields
+### Task 17 — extend form read-back to the remaining fields
 
 Reopening a patient's screening repopulates most of the form
 (`hydrateScreeningForm` in `hydrateScreening.ts`), but a few fields still
