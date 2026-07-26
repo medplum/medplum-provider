@@ -5,6 +5,12 @@ inside this `medplum-provider` checkout. Read this before touching a save
 handler — it's the invariants, gotchas, and platform findings that aren't
 obvious from the code. For what's still open, see `TASKS.md`.
 
+**If the task is a UI or design change, read `CONTRIBUTING.md` first.** It's
+the accessible version of this document, written for design/product
+contributors, and it carries the code-review checklist their changes are
+held to. This file is the deeper technical reference behind it; keep the
+two consistent if you change an invariant.
+
 ## What this is
 
 Maryland DJS's "Admission Health Screening and Nursing Assessment" paper
