@@ -481,6 +481,48 @@ describe('AdmissionHealthScreeningWizard', () => {
       await waitFor(() => expect(fieldInput('Temp (°F)').value).toBe('99.1'));
       expect(checkbox('Latex allergy').checked).toBe(true);
     });
+
+    // Task 17 step 1/2: the task-18/19 free-text fields now save correctly
+    // (their own tests cover that); this confirms they also read back on
+    // reopen, via hydrateScreening.ts's TEXT_CODE_TO_FIELD mapping.
+    test('populates the task-18/19 free-text fields from resources already saved', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family: 'Torres' }],
+      });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Injuries/trauma: details' }],
+        code: { text: 'Injuries/trauma: details' },
+        valueString: 'Fractured wrist 2023, healed',
+      } as Resource);
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Disposition: additional notes' }],
+        code: { text: 'Disposition: additional notes' },
+        valueString: 'Referred to dental',
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Review of Systems');
+      await waitFor(() => expect(fieldTextarea('Details, dates, treatment').value).toBe('Fractured wrist 2023, healed'));
+
+      await goToStep(user, 'Diagnosis & Disposition');
+      await waitFor(() =>
+        expect(fieldTextarea('Additional notes on referrals, logs, or records requested').value).toBe(
+          'Referred to dental'
+        )
+      );
+    });
   });
 
   describe('free-text field persistence (task 18)', () => {

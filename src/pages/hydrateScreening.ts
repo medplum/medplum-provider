@@ -67,6 +67,27 @@ const DENTAL_EXAM_CODE = 'Last dental exam';
 const VISION_EXAM_CODE = 'Last vision exam';
 const ROS_COMMENTS_CODE = 'Review of systems: additional comments';
 
+/**
+ * Observation code → the plain FormState text field it fills, for the
+ * single-value free-text fields added in tasks 18 and 19 (chronic-conditions
+ * card, injuries detail, disposition notes/sign-off timing). All are a bare
+ * `valueString` or `valueDateTime` with nothing else to parse, unlike
+ * `VISION_EXAM_CODE`'s combined "Date: ..., provider: ..." string below.
+ */
+const TEXT_CODE_TO_FIELD: Record<string, string> = {
+  'Doctors/specialists managing chronic conditions': 'chronic-providers',
+  'Primary care provider': 'chronic-pcp',
+  'Chronic conditions: additional comments': 'chronic-comments',
+  'Injuries/trauma: details': 'injuries-detail',
+  'Disposition: additional notes': 'disposition-notes',
+  // Note: 'review-date' stores a date-only string in valueDateTime, not
+  // valueDate — see AdmissionHealthScreeningWizard.tsx's task-19 comment on
+  // why (Observation.value[x] has no valueDate variant). textOrDateTime
+  // below reads either, so this mapping doesn't need to know which.
+  'Admission screening sign-off date/time': 'signoff-datetime',
+  'Admission screening review date': 'review-date',
+};
+
 /** The item value a checklist Observation stands for — the part of its key after `::`. */
 function itemFromKey(res: Observation): string | undefined {
   const key = screeningKey(res);
@@ -82,19 +103,29 @@ function quantityValue(obs: Observation): string | undefined {
   return value === undefined ? undefined : String(value);
 }
 
+/** The single scalar value on a plain text/datetime Observation, whichever of the two it used. */
+function textOrDateTime(obs: Observation): string | undefined {
+  return obs.valueString ?? obs.valueDateTime;
+}
+
 /**
  * Reverse of the wizard's save handlers: turns a patient's live screening
  * resources back into form values, so reopening a partially-completed
  * screening shows what was entered instead of blank fields.
  *
  * Only fields the wizard actually persists can be repopulated. Known gaps,
- * deliberately not mapped here (documented in TASKS.md task 10):
- * - Medications, and the sign-off / mandated-reporter free-text — their
- *   stored form is lossy to reverse (dosage+frequency merged; sign-off is a
- *   formatted string).
- * - Hair/eye colour, race, interpreter, birthplace, vision-acuity grid, and
- *   the ethnicity chip — additional demographics, not yet mapped.
- * - `checkText` free-text on "Other::" items — not yet mapped.
+ * deliberately not mapped here (documented in TASKS.md task 17):
+ * - Medications — `dosage`+`frequency` are merged into one string on save;
+ *   splitting them back into the table's two columns is lossy and needs a
+ *   product decision, not just code (see TASKS.md).
+ * - The sign-off Nurse/Physician signatures and mandated-reporter statement —
+ *   formatted strings, not yet parsed back (disposition-notes/
+ *   signoff-datetime/review-date from that same section ARE mapped, below).
+ * - Hair/eye colour, race, interpreter, birthplace, and the ethnicity chip —
+ *   additional demographics, not yet mapped.
+ * - The 6-cell vision-acuity grid — not yet mapped.
+ * - `checkText` free-text on "Other::" items — not yet mapped; distinct from
+ *   the checkbox toggle above, which already restores correctly.
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
   const scalars: HydratedScalars = {};
@@ -141,6 +172,15 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
       const item = itemFromKey(obs);
       if (item) {
         (checks[grid] ??= []).push(item);
+      }
+      continue;
+    }
+
+    const textField = TEXT_CODE_TO_FIELD[code];
+    if (textField) {
+      const value = textOrDateTime(obs);
+      if (value !== undefined) {
+        texts[textField] = value;
       }
       continue;
     }

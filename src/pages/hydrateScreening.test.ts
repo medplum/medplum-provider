@@ -164,6 +164,45 @@ describe('hydrateScreeningForm', () => {
     expect(texts['vision-provider']).toBe('Dr Smith');
   });
 
+  test('maps the task-18/19 single-value free-text fields into their text keys', () => {
+    const data = empty();
+    data.observations = [
+      obs(
+        'Doctors/specialists managing chronic conditions',
+        'Doctors/specialists managing chronic conditions',
+        { valueString: 'Dr Chen (pulmonology)' }
+      ),
+      obs('Primary care provider', 'Primary care provider', { valueString: 'Dr Patel' }),
+      obs('Chronic conditions: additional comments', 'Chronic conditions: additional comments', {
+        valueString: 'Asthma well controlled on inhaler',
+      }),
+      obs('Injuries/trauma: details', 'Injuries/trauma: details', {
+        valueString: 'Fractured wrist 2023, healed',
+      }),
+      obs('Disposition: additional notes', 'Disposition: additional notes', {
+        valueString: 'Referred to dental',
+      }),
+      // These two use valueDateTime, not valueString — textOrDateTime must read
+      // the right one without the mapping needing to know which per field.
+      obs('Admission screening sign-off date/time', 'Admission screening sign-off date/time', {
+        valueDateTime: '2026-07-26T10:15',
+      }),
+      obs('Admission screening review date', 'Admission screening review date', {
+        valueDateTime: '2026-08-15',
+      }),
+    ];
+
+    const { texts } = hydrateScreeningForm(data, undefined);
+
+    expect(texts['chronic-providers']).toBe('Dr Chen (pulmonology)');
+    expect(texts['chronic-pcp']).toBe('Dr Patel');
+    expect(texts['chronic-comments']).toBe('Asthma well controlled on inhaler');
+    expect(texts['injuries-detail']).toBe('Fractured wrist 2023, healed');
+    expect(texts['disposition-notes']).toBe('Referred to dental');
+    expect(texts['signoff-datetime']).toBe('2026-07-26T10:15');
+    expect(texts['review-date']).toBe('2026-08-15');
+  });
+
   test('returns empty structures for a patient with nothing on file', () => {
     const result = hydrateScreeningForm(empty(), undefined);
     expect(result.scalars).toEqual({});
