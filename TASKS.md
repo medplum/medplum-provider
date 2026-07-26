@@ -149,16 +149,17 @@ Suggested order, easiest/highest-value first:
    documenting that explicitly. Needs a product call, not just code — flag
    this one for a decision rather than guessing an approach.
 
-7. **Sign-off** — `valueString: "Nurse: X; Physician: Y"` plus
-   `health-alerts` in a `note`. Same parse-the-formatted-string approach
-   already used for `'Last vision exam'` in `hydrateScreeningForm` (see the
-   `Date: ..., provider: ...` regex there) — write a similar regex for
-   `Nurse: (.*); Physician: (.*)`, then note → `health-alerts`.
+7. **Sign-off** — **DONE** (`7d8e81b`). Same parse-the-formatted-string
+   approach as `VISION_EXAM_CODE`; the `—` placeholder for an unfilled
+   signature is recognized and skipped, not treated as a real name.
 
-8. **Mandated-reporter** checkbox + RN initials. Saved as one Observation
-   (`'Mandated reporter statement read to youth'`) with the initials in a
-   `note` (`RN initials: ${initials}`) — presence of the Observation means
-   the checkbox was checked; parse the note for the initials.
+8. **Mandated-reporter** — **DONE** (`7d8e81b`), same commit. Presence of
+   the Observation means the checkbox was checked (no separate "checked but
+   empty" state to handle, unlike glasses-history); RN initials parsed from
+   the note.
+
+**Task 17 is now complete except step 6 (medications), paused pending a
+product decision — not a code question.**
 
 For every step: the wiring is already in place (the mount effect in
 `AdmissionHealthScreeningWizard.tsx` applies whatever `hydrateScreeningForm`
