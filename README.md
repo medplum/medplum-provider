@@ -1,11 +1,222 @@
-# DJS Admission Health Screening — medplum-provider theme
+# DJS Admission Health Screening — Medplum prototype
+
+Maryland DJS's **Admission Health Screening and Nursing Assessment** paper form,
+rebuilt as a React wizard storing real FHIR data through
+[Medplum](https://www.medplum.com/), running inside a `medplum-provider`
+checkout.
+
+The project has **two purposes**, and the second one shapes how the work is
+done:
+
+1. Build a working admission screening wizard.
+2. **Evaluate whether Medplum is a viable platform for this agency.**
+
+Because of (2), platform limitations and bugs found along the way are treated as
+deliverables, not obstacles — they're documented rather than quietly worked
+around. See [Platform findings](#platform-findings) below; that section is
+arguably the most valuable output so far.
+
+> **The data here is health information about minors in state custody**,
+> including abuse history and substance use. Data loss is a clinical problem,
+> not a cosmetic one, and records are withdrawn rather than deleted so the trail
+> stays auditable. Nothing currently restricts field-level visibility beyond
+> default patient-record access — an AccessPolicy is open work, tracked in
+> `TASKS.md`.
+
+---
+
+## Start here
+
+| If you're… | Read |
+| --- | --- |
+| Making UI or design changes | **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — the ways this app breaks silently, plus the code-review checklist |
+| Writing or changing save/read code | **[`CLAUDE.md`](CLAUDE.md)** — invariants, bug classes, platform findings |
+| Wondering what's done or planned, and why | **[`TASKS.md`](TASKS.md)** — source of truth, including the reasoning behind decisions |
+
+`CONTRIBUTING.md` is the accessible on-ramp; `CLAUDE.md` is the deeper technical
+reference behind it.
+
+---
+
+## Quick start
+
+```bash
+npm install
+npm run dev          # vite on localhost:3001
+npm test             # offline test suite — fast, no setup
+npm run build        # tsc + vite build (type-checks tests too)
+```
+
+The wizard lives at `/admission-screening[/:patientId[/:encounterId]]`, plus an
+"Admission Screening" entry in the sidebar Quick Links. It needs a real Medplum
+project to sign into — `.env` ships as the stock template with an empty client
+ID, so point `MEDPLUM_BASE_URL` at your project or a local server on `:8103`.
+
+`preview.html` is a static, dependency-free mirror of the wizard for a quick
+visual look with no build step. It's hand-maintained, so treat it as a sketch
+rather than the truth.
+
+---
+
+## Current state
+
+**Four sections**, all wired to real FHIR resources — nothing stubbed:
+
+1. **Patient Information** — demographics, identification, mandated-reporter
+   attestation
+2. **Current Health Status** — vitals, vision, complaint, pain, medications,
+   allergies, chronic conditions, appearance/mental status
+3. **Review of Systems** — injuries/trauma, oral/dental, infectious history
+4. **Diagnosis & Disposition** — nursing diagnoses, nursing plan, sign-off
+
+**Originally nine sections.** Skin/Body Exam, Mental Status & Psychosocial,
+Abuse/Substance/Family History, and Reproductive Health were **cut and are not
+coming back.** If you find code or docs referencing them, that's debris — say
+so. (Allergies, chronic conditions, and appearance were folded into section 2
+rather than removed.)
+
+### What works today
+
+- Saving each section, with success/error feedback
+- **Resuming a partially-completed screening** — reopening a patient repopulates
+  the form from what's stored
+- **Idempotent saves** — re-saving updates in place instead of duplicating
+- **Withdrawal, not deletion** — unchecking an item marks its record
+  `entered-in-error` and keeps the history
+- A read-only screening summary on the patient page, shown alongside Medplum's
+  own `PatientSummary` rather than replacing it
+
+### Known rough edges
+
+- The wizard draws its own banner/header/sidebar/footer *inside* the host app's
+  chrome. Accepted deliberately — function over appearance for this prototype.
+- Most clinical content is still free text rather than coded terminology. Vitals
+  and medication dosage are now properly coded; the rest is tracked as tasks
+  22–35.
+- No field validation (vitals ranges, date sanity) anywhere yet.
+
+---
+
+## How data is stored
+
+Every resource the wizard writes carries an identifier under
+`http://maryland.gov/djs/admission-screening`, derived from the field that
+produced it. That's what makes re-saving update in place rather than duplicate —
+and it's why **some on-screen text is data, not decoration** (see
+`CONTRIBUTING.md` §1 before renaming anything).
+
+| Section | FHIR resources |
+| --- | --- |
+| 1. Patient Information | `Patient` (name, birthDate, gender, language, birthplace/race/ethnicity extensions); `Encounter` (admission date, facility) → `Location`; `Observation` for hair/eye colour and the mandated-reporter attestation |
+| 2. Current Health Status | `Observation` vitals — LOINC-coded, `category: vital-signs`, UCUM units, blood pressure as a two-component panel; `Observation` for vision acuity, complaint, pain; `MedicationStatement` per medication with structured `Dosage`; `AllergyIntolerance` per allergy; `Condition` per chronic condition |
+| 3. Review of Systems | `Observation` per checked finding, plus dental/vision exam dates and comments |
+| 4. Diagnosis & Disposition | `Condition` per nursing diagnosis; `CarePlan` for the nursing plan; `Observation` for sign-off, disposition notes and review date |
+
+Facilities are real `Location` resources keyed on a permanent code, so a
+facility's display name can change without stranding prior admissions. The
+facility field is a closed dropdown on purpose — see `src/pages/djsFacilities.ts`.
+
+---
+
+## Architecture
+
+```
+src/
+  pages/
+    AdmissionHealthScreeningWizard.tsx  — the wizard; all 4 sections + save handlers
+    screeningData.ts    — the one place screening resources are read back;
+                          also the shared dose/blood-pressure/vital helpers
+    hydrateScreening.ts — pure function: stored resources → form values
+    djsFacilities.ts    — canonical DJS facility list (codes are permanent)
+    formState.ts        — chip/check/text/table state + the "A|B::text" item parser
+  components/
+    DjsPatientSummary.tsx — read-only screening summary on the patient page
+    SidebarStepper · PatientBand · Card · ChipGroup · CheckGrid
+    FormControls · Callout · DynamicTable · MarylandChrome
+  theme/
+    tokens.css          — design tokens and every .djs-* class (loads globally)
+    mantine-theme.ts    — intentionally unused; see below
+preview.html            — static preview, hand-maintained
+```
+
+Two things that surprise people:
+
+- **DJS screens don't use Mantine**, even though the surrounding app does.
+  They're raw HTML plus `.djs-*` classes. `mantine-theme.ts` exists but is
+  deliberately **not applied** — wiring it up would restyle the rest of the
+  application for no benefit.
+- **`tokens.css` loads globally**, so it must never contain a bare element
+  selector (`body`, `input`). Everything is scoped to `.djs-*`.
+
+---
+
+## Testing, and what's actually proven
+
+```bash
+npm test             # offline suite (MockClient) — 103 DJS tests
+npm run test:live    # against a real Medplum server
+```
+
+The split matters. **`MockClient` lies in both directions**: it accepts
+constraint-violating resources the real server rejects, and it matches some
+searches the real server doesn't. So the offline suite runs writes through
+`validateResource` to catch FHIR constraint errors offline, and anything
+touching the write path also gets a live test.
+
+`npm run test:live` needs `MEDPLUM_LIVE_CLIENT_ID` / `MEDPLUM_LIVE_CLIENT_SECRET`
+against a running Medplum stack. **Without them the suite skips cleanly**, so
+it's always safe to run — it just reports zero tests.
+
+Conventions worth keeping:
+
+- A new field gets a test proving it **saves and comes back**, not just that it
+  renders.
+- Tests are **mutation-verified**: break the code on purpose, confirm the test
+  goes red with a real error, restore. An unverified test is a false sense of
+  security, and this codebase has been bitten by exactly that.
+- Clinical codes are **looked up in the spec and cited**, never recalled. A
+  plausible-but-wrong LOINC code is worse than none because it looks
+  authoritative.
+
+---
+
+## Platform findings
+
+The evaluation output so far. Details and reproductions in `CLAUDE.md`.
+
+| Finding | Impact |
+| --- | --- |
+| **`executeBatch` with `type: "transaction"` is not atomic** on Medplum 5.1.27. A bundle with one valid and one invalid entry partially committed, and the call *resolved* rather than rejecting. | There is no way to get atomic multi-resource writes from this server via `executeBatch`. A platform ceiling, not a client bug. Attempted twice and reverted both times; the app relies on idempotent upserts so a partial save self-heals on retry. |
+| **A resource created inside a transaction Bundle isn't immediately searchable.** | Silently broke retraction on the real server while every offline test stayed green. |
+| **`MockClient` doesn't enforce FHIR invariants.** | Constraint bugs pass offline and only surface against a real server. Mitigated with a `validateResource` harness. |
+| **A bare `identifier=<system>\|` search behaves differently** — MockClient matches it, the live server returns nothing. | Would silently show an empty screening even when data exists. Never narrow a search that way. |
+| **Conditional PUT on a *populated* custom identifier works correctly** — verified live across both the create and reuse paths. | The positive counterpart to the above, and what the no-duplicate-facilities design rests on. |
+
+A recurring *application* bug class worth naming too: **a field wired into the
+JSX but read by no save handler**. It has happened five times, always silently —
+the nurse types, clicks save, sees success, and the data is discarded. The
+automated field check can't see sections 1–2, which is where the most recent
+instance hid.
+
+---
+
+## What's next
+
+`TASKS.md` is authoritative. In short: a FHIR-modeling audit produced tasks
+24–37, of which the data-loss and blood-pressure/vitals items are done. Open
+work is mostly coded terminology (allergy categories, RxNorm, Condition
+categories), practitioner attribution on every resource, and two larger
+questions — whether to adopt `QuestionnaireResponse` as the persistence model,
+and a checklist remodel that would change how identifiers are derived.
+
+---
 
 ## USWDS theming
 
-Unlike Maryland's MDWDS, the U.S. Web Design System (USWDS,
-[designsystem.digital.gov](https://designsystem.digital.gov/)) publishes
-its tokens openly, so this is the real default USWDS palette rather than
-a reconstruction:
+Unlike Maryland's MDWDS, the U.S. Web Design System
+([designsystem.digital.gov](https://designsystem.digital.gov/)) publishes its
+tokens openly, so this is the real default USWDS palette rather than a
+reconstruction:
 
 | Token | USWDS system color | Hex |
 |---|---|---|
@@ -18,238 +229,11 @@ a reconstruction:
 | success (banner lock icon) | green-cool-40v | `#00a91c` |
 | focus ring | — | `#2491ff` |
 
-Typography is Public Sans (USWDS's default theme typeface), 4px base
-corner radius on buttons/inputs/chips, and the focus style is an
-outline (not a box-shadow glow) to match USWDS's actual focus treatment.
-The `.gov` banner's lock icon is green — I'd originally used
-Maryland's own red/green pairing here for a different color role; real
-USWDS reserves green specifically for that icon (`--usa-banner-security-icon__color`),
-which is now fixed.
+Typography is Public Sans (USWDS's default theme typeface), 4px base corner
+radius on buttons/inputs/chips, and the focus style is an outline rather than a
+box-shadow glow, matching USWDS's actual focus treatment. The `.gov` banner's
+lock icon is green because real USWDS reserves green specifically for that icon.
 
-**For pixel-exact parity** — the real component CSS, exact spacing
-scale, the actual `usa-banner`/`usa-accordion` markup — install the
-real package (`npm i @uswds/uswds`) and use its SCSS/CSS directly rather
-than relying on these hand-reconstructed tokens layered onto the
-mockup's own component set. What's here gets you USWDS's visual
-language (colors, type, radius, focus states) on top of the wizard's
-existing components; it isn't a swap-in of USWDS's actual component
-library.
-
-
-A component library that reproduces the UI from
-`djs-admission-health-screening-mockup.html` (dark sidebar wizard, sticky
-patient band, numbered cards, chip toggles, checkbox grids, reveal
-sections) as real React components wired to Medplum, dropped into
-`medplum-provider`.
-
-Open `preview.html` in a browser for a static look at the shell before
-wiring anything up.
-
-## What's fully wired
-
-All 9 sections in `src/pages/AdmissionHealthScreeningWizard.tsx` are
-complete and persist real FHIR resources via `useMedplum()` — nothing
-is stubbed. The resource mapping actually used, per section, is below
-(this is what's implemented now, not just a suggestion).
-
-## FHIR resource mapping (as implemented)
-
-| Section | Content | Suggested FHIR resource(s) |
-|---|---|---|
-| 1. Demographics | name, DOB, sex, ethnicity, race, language | `Patient` (name, birthDate, gender, extensions for race/ethnicity/language) |
-| 2. Current Health Status | vitals, vision, complaint, pain, meds | `Observation` (vitals, vision, pain score), `MedicationStatement` (current meds) |
-| 3. Allergies & Chronic | allergies, chronic conditions | `AllergyIntolerance`, `Condition` (clinicalStatus: active) |
-| 4. Skin / Body Exam | findings + body-chart markers | `Observation` (one per finding, `bodySite` coded from the marker location) |
-| 5. Mental Status & Psychosocial | psych history, SI/HI screening | `Condition` (psych diagnoses), `Observation` (SI/HI screening result — consider a `RiskAssessment` for the "active ideation" flag so it's queryable as a flagged risk) |
-| 6. Abuse, Substance & Family | abuse history, substance use, family hx | `Observation` or `Condition` for abuse history (handle with the same access-policy sensitivity as any disclosure), `Observation` per substance (SNOMED-coded), `FamilyMemberHistory` |
-| 7. Review of Systems | systems checklist | `Observation`, one per system reviewed, or a single `QuestionnaireResponse` if you'd rather keep ROS as one structured form |
-| 8. Reproductive Health | male/female-specific fields | `Observation` (LMP, contraception, etc.), gated on `Patient.gender` |
-| 9. Diagnosis & Disposition | nursing plan, sign-off | `Condition` (diagnoses); `ServiceRequest` per lab and per referral (implemented); `Observation` for PPD/health-ed/MD-contacted events (implemented); `CarePlan.activity[]` for everything else (implemented); sign-off is still a plain `Observation`, not a real `Provenance`/`Composition` signature — that upgrade is still open |
-
-For anything checklist-like (races, allergies, substances, ROS systems),
-consider whether you actually want one `Observation` per checked item
-(queryable, reportable) vs. a single `QuestionnaireResponse` capturing the
-whole section as answered (faster to build, matches the paper form
-1:1, less granular for downstream queries). The wizard as built favors
-discrete Observations for anything clinically actionable (vitals, pain,
-allergies) and would suggest QuestionnaireResponse for the more
-checklist-heavy sections (Review of Systems) if you want to move faster.
-
-## Files
-
-```
-src/
-  theme/
-    tokens.css              — design tokens + all component CSS classes
-    mantine-theme.ts        — MantineThemeOverride matching the palette
-  components/
-    SidebarStepper.tsx      — dark wizard nav with progress ring
-    PatientBand.tsx         — sticky patient strip, reads a real Patient resource
-    Card.tsx                — Card, FieldGrid, Field, SectionHeader
-    ChipGroup.tsx           — segmented single-select + Reveal wrapper
-    CheckGrid.tsx           — multi-select checkbox grid
-    FormControls.tsx        — TrackedChip/YesNoChip/Grid — FormState-bound wrappers used throughout Sections 3–9
-    Callout.tsx             — amber/red/critical alert banners
-    DynamicTable.tsx        — add/remove-row table (substances, family hx)
-    MarylandChrome.tsx      — GovBanner, AppHeader, AppFooter
-  pages/
-    AdmissionHealthScreeningWizard.tsx  — full page, all 9 sections wired
-    formState.ts            — generic chip/check/text/table state container + the mockup's "A|B::text" item-spec parser
-preview.html                 — static HTML/CSS preview, no build step
-```
-
-## Integration into medplum-provider
-
-1. Copy `src/theme/`, `src/components/`, `src/pages/` into your
-   `medplum-provider` repo's `src/` (e.g. under `src/djs/`).
-2. Import the CSS once, near your app root:
-   ```ts
-   import './djs/theme/tokens.css';
-   ```
-3. Apply the Mantine theme:
-   ```tsx
-   import { MantineProvider } from '@mantine/core';
-   import { djsTheme } from './djs/theme/mantine-theme';
-
-   <MantineProvider theme={djsTheme}>
-     {/* app */}
-   </MantineProvider>
-   ```
-4. Add a route to the wizard, e.g. in your router:
-   ```tsx
-   <Route path="/Patient/:id/admission-screening" element={<AdmissionHealthScreeningWizard patientId={id} />} />
-   ```
-5. `AdmissionHealthScreeningWizard` uses `useMedplum()` from
-   `@medplum/react-hooks` — make sure the route is inside your existing
-   `MedplumProvider`, which `medplum-provider` already sets up.
-
-## Not carried over from the mockup (by design)
-
-- The body-chart click-to-place-marker interaction was visual-only in
-  the mockup ("mockup — visual only" per its own comment). Section 4
-  captures findings as a checklist + free-text location notes instead;
-  wiring an actual clickable SVG body map to coded `Observation.bodySite`
-  values is a further step I'd scope separately once you've confirmed
-  the coding approach.
-- Google Fonts `<link>` tags — pull Roboto/Roboto Mono in through
-  whatever font-loading approach `medplum-provider` already uses.
-
-## Changelog
-
-- **Merged Sections 3 and 4 into the bottom of Section 2** (down from 6
-  sections to 4): Allergies, Chronic Health Conditions, and Appearance &
-  Mental Status are now cards within "Current Health Status" alongside
-  vitals/vision/complaint/pain/medications, rather than their own steps.
-  One combined "Save health status" button now calls `saveVitals`,
-  `saveAllergiesChronic`, and `saveMentalStatus` in sequence. Review of
-  Systems and Nursing Diagnosis & Disposition renumbered to Sections 3
-  and 4 accordingly.
-
-- **Scope narrowed (intentional):** Skin/Body Examination, Abuse/Substance/Family
-  History (including the Phase 2 substance grid and Phase 3 Task-based
-  compliance deadline), and Reproductive Health were removed entirely —
-  down from 9 sections to 6. Nursing Plan/Disposition was also reverted
-  from Phase 6's structured `ServiceRequest`-per-lab/referral model back
-  to a flat checklist. Cleaned up leftover debris from that edit: an
-  orphaned `SubstanceUseGrid`/`SUBSTANCES` import, dead code in
-  `saveMentalStatus` referencing `mh-dx`/`si-now`/`si-hist` fields that
-  no longer have any input UI, a trailing-`|` bug that rendered a blank
-  labelless checkbox in Nursing Plan, and two typos ("Iatient
-  Information", a trailing space in Section 4's title).
-- Section 4's description text still warns staff to contact Behavioral
-  Health for current SI/HI — left as-is since removing a safety-warning
-  line is a more deliberate call than a typo fix, but it's now
-  describing a check the form doesn't actually perform.
-
-- **Phase 6 (Nursing Plan/Disposition):** replaced the flat 18-item
-  checklist (which flattened everything into one `CarePlan.description`
-  string) with the real form's actual structure: specific labs
-  (Urine GC/Chlamydia, rapid pregnancy test, prenatal labs, drug screen,
-  CBC/RPR/HIV/MMR, Hep C Ab, lead level) each become their own real
-  `ServiceRequest`; specific referrals (Behavioral Health, CPS, Dentist,
-  Optometrist, Psychiatrist, Gyn/Midwife) each become their own
-  `ServiceRequest` with `performerType` carrying the specialty; PPD
-  result, health-education topics, and both MD/NP-contacted events
-  become individual `Observation`s with real timestamps; everything
-  else (TB screening initiated, sick call, logs, disposition, special
-  needs) is a structured `CarePlan.activity[]` list instead of one
-  flattened string.
-- Fixed three more silently-dropped fields in the same section:
-  `disposition-notes`, `signoff-datetime`, and `review-date` were
-  captured in state but never included in the save handler.
-
-- **Phase 4 (Page 1 & vitals gaps):** added everything the real form has
-  that the build didn't — place of birth, primary language + needs-interpreter,
-  race checklist, hair/eye color, and the mandated-reporter statement +
-  RN-initials attestation on Page 1; BMI (computed from weight/height),
-  a vision-screen table (left/right/both eyes, with and without
-  correction, plus glasses-history), and a current-medications table
-  (`MedicationStatement` per row) on Page 2. Race and needs-interpreter
-  are modeled as `Patient` extensions (`us-core-race`, and an informal
-  non-standard extension for needs-interpreter since there's no
-  standard one); place of birth uses the real standard
-  `patient-birthPlace` extension.
-- **Phase 3 (abuse-disclosure compliance deadline):** the real form's
-  requirement that "MD/NP must be notified within 7 days of admission"
-  when sexual abuse is disclosed is now a real `Task` resource
-  (`priority: urgent`, `restriction.period.end` = admission date + 7
-  days) instead of just narrative text — trackable/queryable rather
-  than something that can get lost in a note. Also added the "called
-  MD/NP now for consultation" field the real form has for disclosures
-  within the past 2 weeks.
-- **Phase 2 (substance use):** replaced the disconnected substance
-  checklist + free-add table (checking "Heroin" above did nothing — the
-  checklist was never even saved; details had to be re-typed by hand
-  into a separate table) with `SubstanceUseGrid`, a fixed one-row-per-substance
-  table where checking a substance and filling in its age/route/amount/last-used
-  is one action. Splits the real form's combined checkboxes
-  (Marijuana/Synthetic THC, Heroin/Fentanyl) into independently trackable
-  substances since a youth can use one without the other. Saved as one
-  `Observation` per substance with structured `component[]` fields
-  (age, route, amount/frequency, last used) rather than a flattened
-  string — more correct FHIR modeling than most of the rest of this
-  file, worth matching elsewhere eventually.
-- Fixed five more silently-dropped fields in the same section: the
-  withdrawal/withdrawal-risk/overdose/prior-treatment/MAT yes-no
-  questions and both the substance-use and family-history "additional
-  comments" fields were captured in state but never included in the
-  save handler.
-- **Phase 1 (Review of Systems):** added the missing "Other: ___"
-  option to 9 of 11 panels, added Last Hearing Test / Last Dental Exam
-  / Urine Color fields that the real form has but the build didn't,
-  expanded Oral/Dental's Breath/Teeth/Gums into the real form's full
-  set of options, and turned Injury Prevention from decorative text
-  into an actual saveable attestation checkbox.
-- Fixed two more silently-dropped fields in Review of Systems: vision
-  exam date/provider and the "additional comments" field were captured
-  but never saved.
-- All 9 sections implemented and wired to real FHIR resources (Sections
-  3–9 were previously placeholders).
-- Fixed a bug in Section 8's save handler: it referenced field keys
-  (`male-sex-summary`, `male-hiv-detail`, `fem-sex-summary`,
-  `fem-hiv-detail`, `fem-preg-detail`) that were never actually set by
-  any input in the form — meaning menstrual history, birth control,
-  pregnancy details, sexual history, and identity/safety answers were
-  silently not being saved. Rewritten to persist every real field
-  captured in the section, for both the male and female branches.
-
-## Known follow-up (not yet fixed)
-
-Section 6's **Family History** has the same disconnected pattern that
-substance use had before this update: a `family-hx` checklist Grid is
-rendered but never saved — only the separate free-add `family-table`
-rows are persisted. This is Phase 5 in the migration plan (tightening
-Family History to the real form's fixed condition×relative shape);
-flagged here rather than fixed opportunistically so it gets the same
-"redesign the data shape" treatment the substance table just got,
-instead of a quick patch.
-
-## Sensitive-content note
-
-Sections 5–6 capture abuse history, suicidal/homicidal ideation, and
-substance use for a minor population. Whatever resources you land on,
-make sure your Medplum project's access policies restrict these fields
-beyond default patient-record visibility (e.g. a narrower AccessPolicy
-for behavioral-health-flagged Observations/Conditions), consistent with
-however your agency already segments records with elevated
-confidentiality needs.
+**For pixel-exact parity**, install the real package (`npm i @uswds/uswds`) and
+use its SCSS/CSS directly. What's here gives you USWDS's visual language on top
+of the wizard's own components; it isn't a swap-in of USWDS's component library.
