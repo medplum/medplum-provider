@@ -78,6 +78,15 @@ don't extrapolate from a green unit run.
   re-deriving it. The drug name itself is still uncoded free text —
   RxNorm mapping is tracked separately as task 22, since it needs a
   drug-search/terminology source this form doesn't have.
+- `src/pages/djsFacilities.ts` — the 13 canonical DJS facilities. **A
+  facility's `code` is permanent identity; its `name` is a mutable display
+  label.** `Location` resources are upserted on the code and `Encounter`s
+  reference the result, so changing a code would orphan prior admissions
+  from their facility, while renaming is a plain update that touches no
+  stored data. The facility field is a **closed-set dropdown with no
+  free-text escape** — a typed fallback would reintroduce the
+  duplicate-Location problem the code list exists to prevent. Add
+  facilities here; never let one be minted ad hoc mid-admission.
 - `src/pages/hydrateScreening.ts` — `hydrateScreeningForm(data, patient)`:
   pure function, live resources → form values, for resuming a
   partially-completed screening. Kept pure and separately unit-tested
@@ -225,6 +234,13 @@ constraints `ait-2`/`con-5`. `clinicalStatus` must be **removed**, not just
 left in place, when retracting those two types.
 
 ## Verifying a change
+
+**The field-integrity script only sees `FormState` keys.** Sections 1–2
+use dedicated `useState` (`admissionDate`, `facilityCode`, `temp`, `bp`,
+…), and **none of that state is covered by either direction of the check**
+— task 24's data loss (admission date and facility captured, rendered, and
+saved nowhere) sat in exactly that gap. When you add a section-1/2 scalar,
+the script will not help you; trace it to a save handler by hand.
 
 **Field integrity** — every read in a save handler should have a matching
 set in the JSX, and vice versa:

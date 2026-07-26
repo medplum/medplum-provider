@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import type { WithId } from '@medplum/core';
 import { validateResource } from '@medplum/core';
-import type { Bundle, Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Encounter, Location, Patient, Resource } from '@medplum/fhirtypes';
 import { DrAliceSmith, MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, expect, test, vi } from 'vitest';
 import { AdmissionHealthScreeningWizard } from './AdmissionHealthScreeningWizard';
+import { DJS_FACILITIES } from './djsFacilities';
 
 // Duplicated from AdmissionHealthScreeningWizard.tsx — the wizard doesn't
 // export it, and re-deriving it here from the same source-of-truth string
@@ -488,6 +489,118 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(pain).toBeDefined();
       expect(pain?.valueInteger).toBeUndefined();
       expect(pain?.dataAbsentReason).toBeDefined();
+    });
+  });
+
+  describe('admission Encounter and facility Location (task 24)', () => {
+    /** Selects a facility by its visible name in the Facility dropdown. */
+    async function selectFacility(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+      const select = document.querySelector('select') as HTMLSelectElement;
+      await user.selectOptions(select, screen.getByRole('option', { name }));
+    }
+
+    // admissionDate and facility were captured in the JSX and read by no save
+    // handler — the same silent-data-loss class as the Epi-Pen and task-18/19
+    // fields, and invisible to the field-integrity script because they are
+    // useState rather than FormState keys.
+    test('saves the admission date and facility that were previously discarded', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), 'Doe');
+      fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-20' } });
+      await selectFacility(user, 'Cheltenham');
+      await saveSection(user, /save demographics/i);
+
+      const encounter = capture.written.find((r) => r.resourceType === 'Encounter') as Encounter | undefined;
+      expect(encounter).toBeDefined();
+      expect(encounter?.period?.start).toBe('2026-07-20');
+      // FHIR requires both; neither has a sensible default.
+      expect(encounter?.status).toBeDefined();
+      expect(encounter?.class?.code).toBe('IMP');
+
+      const location = capture.written.find((r) => r.resourceType === 'Location') as Location | undefined;
+      expect(location?.name).toBe('Cheltenham');
+      expect(location?.identifier?.[0]).toEqual({
+        system: 'http://maryland.gov/djs/facility',
+        value: 'cheltenham',
+      });
+
+      // The Encounter must point at the Location by reference and must NOT
+      // carry a copy of its name — a second copy would go stale on rename.
+      expect(encounter?.location?.[0].location?.reference).toContain('Location/');
+      expect(JSON.stringify(encounter)).not.toContain('Cheltenham');
+
+      expect(capture.validationErrors).toEqual([]);
+    });
+
+    // The reason identity hangs on the code rather than the name: re-saving,
+    // and two different patients admitted to the same facility, must all
+    // converge on ONE Location rather than minting duplicates.
+    test('re-saving and a second patient reuse the same Location, never duplicating it', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), 'Doe');
+      await selectFacility(user, 'Hickey');
+      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save demographics/i);
+
+      const locations = await medplum.searchResources('Location', {
+        identifier: 'http://maryland.gov/djs/facility|hickey',
+      });
+      expect(locations).toHaveLength(1);
+
+      // And the admission Encounter itself upserts in place rather than
+      // creating a second admission on every save.
+      const encounters = await medplum.searchResources('Encounter', {
+        identifier: `${SCREENING_ID_SYSTEM}|admission-encounter`,
+      });
+      expect(encounters).toHaveLength(1);
+    });
+
+    test('populates the admission date and facility dropdown on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Reyes' }] });
+      const location = await medplum.createResource({
+        resourceType: 'Location',
+        status: 'active',
+        name: 'Victor Cullen',
+        identifier: [{ system: 'http://maryland.gov/djs/facility', value: 'victor-cullen' }],
+      } as Resource);
+      await medplum.createResource({
+        resourceType: 'Encounter',
+        status: 'in-progress',
+        class: { code: 'IMP' },
+        subject: { reference: `Patient/${patient.id}` },
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'admission-encounter' }],
+        period: { start: '2026-07-18' },
+        location: [{ location: { reference: `Location/${location.id}` } }],
+      } as Resource);
+
+      await renderWizardForPatient(medplum, patient.id);
+
+      await waitFor(() => expect(fieldInput('Date of admission').value).toBe('2026-07-18'));
+      expect((document.querySelector('select') as HTMLSelectElement).value).toBe('victor-cullen');
+    });
+
+    test('the facility dropdown is a closed set with no free-text escape', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      await renderWizard(medplum);
+
+      const select = document.querySelector('select') as HTMLSelectElement;
+      expect(select).toBeInstanceOf(HTMLSelectElement);
+      // 13 canonical facilities plus the empty placeholder.
+      expect(select.options).toHaveLength(DJS_FACILITIES.length + 1);
+      // An "Other"/free-text option would reintroduce the duplication problem.
+      expect(screen.queryByRole('option', { name: /other/i })).not.toBeInTheDocument();
     });
   });
 

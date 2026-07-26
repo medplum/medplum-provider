@@ -4,6 +4,8 @@ import type {
   AllergyIntolerance,
   CarePlan,
   Condition,
+  Encounter,
+  Location,
   MedicationStatement,
   Observation,
   Patient,
@@ -13,7 +15,16 @@ import { hydrateScreeningForm } from './hydrateScreening';
 import { SCREENING_ID_SYSTEM, type ScreeningResources } from './screeningData';
 
 function empty(): ScreeningResources {
-  return { observations: [], conditions: [], allergies: [], medications: [], carePlans: [], byKey: new Map() };
+  return {
+    observations: [],
+    conditions: [],
+    allergies: [],
+    medications: [],
+    carePlans: [],
+    encounters: [],
+    locations: [],
+    byKey: new Map(),
+  };
 }
 
 function obs(code: string, key: string, extra: Partial<Observation>): Observation {
@@ -506,6 +517,90 @@ describe('hydrateScreeningForm', () => {
 
       expect(checks['chronic-list']).toEqual(['Other']);
       expect(checkTexts['chronic-list']).toEqual({ Other: 'Ehlers-Danlos syndrome' });
+    });
+  });
+
+  describe('admission Encounter: date and facility (task 24)', () => {
+    const FACILITY_SYSTEM = 'http://maryland.gov/djs/facility';
+
+    function admissionEncounter(extra: Partial<Encounter>): Encounter {
+      return {
+        resourceType: 'Encounter',
+        status: 'in-progress',
+        class: { code: 'IMP' },
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'admission-encounter' }],
+        ...extra,
+      } as Encounter;
+    }
+
+    test('reads the admission date and resolves the facility to its stable code', () => {
+      const data = empty();
+      data.encounters = [
+        admissionEncounter({
+          period: { start: '2026-07-20' },
+          location: [{ location: { reference: 'Location/loc-1' } }],
+        }),
+      ];
+      data.locations = [
+        {
+          resourceType: 'Location',
+          id: 'loc-1',
+          name: 'Cheltenham',
+          identifier: [{ system: FACILITY_SYSTEM, value: 'cheltenham' }],
+        } as Location,
+      ];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.admissionDate).toBe('2026-07-20');
+      expect(scalars.facilityCode).toBe('cheltenham');
+    });
+
+    // The whole point of keying on the code: staff-facing display names are
+    // expected to change (short paper-form names now, official names later),
+    // and a rename must not break read-back or look like a different facility.
+    test('recovers the facility after its display name changes', () => {
+      const data = empty();
+      data.encounters = [admissionEncounter({ location: [{ location: { reference: 'Location/loc-1' } }] })];
+      data.locations = [
+        {
+          resourceType: 'Location',
+          id: 'loc-1',
+          name: 'Charles H. Hickey Jr. School', // renamed from 'Hickey'
+          identifier: [{ system: FACILITY_SYSTEM, value: 'hickey' }],
+        } as Location,
+      ];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.facilityCode).toBe('hickey');
+    });
+
+    test('leaves the facility unset when the Encounter has no location', () => {
+      const data = empty();
+      data.encounters = [admissionEncounter({ period: { start: '2026-07-20' } })];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.admissionDate).toBe('2026-07-20');
+      expect(scalars.facilityCode).toBeUndefined();
+    });
+
+    test('ignores an Encounter that is not the admission encounter', () => {
+      const data = empty();
+      data.encounters = [
+        {
+          resourceType: 'Encounter',
+          status: 'finished',
+          class: { code: 'AMB' },
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: 'some-other-encounter' }],
+          period: { start: '2020-01-01' },
+        } as Encounter,
+      ];
+
+      const { scalars } = hydrateScreeningForm(data, undefined);
+
+      expect(scalars.admissionDate).toBeUndefined();
     });
   });
 

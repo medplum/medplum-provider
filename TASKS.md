@@ -244,21 +244,72 @@ picking any of these up:
 ### Tier 1 — data loss and clear correctness bugs
 
 **Task 24 — create the Encounter; persist admission date + facility.
-DATA LOSS.** `admissionDate` and `facilityName` are captured in the JSX,
-shown in `PatientBand`, and read by **no save handler**. Same class as
+DATA LOSS. — DONE** (see also task 36 for the remaining linkage work).
+
+`admissionDate` and `facilityName` were captured in the JSX, shown in
+`PatientBand`, and read by **no save handler** — same class as
 epipen/task-18/19, and **invisible to the field-integrity script** because
-they're `useState`, not FormState keys — a reminder that the script's
-"set but never read" side doesn't cover section-1/2 scalar state at all.
-The reason they have nowhere to go is the modeling gap: the wizard never
-creates an `Encounter`, though an admission screening *is* one.
-**Design decisions resolved 2026-07-26:** facility is a real first-class
-`Location` resource (in any final product Location reflects the custodial
-system, so it must be referenceable, not a display string), and the wizard
-creates the Encounter rather than only consuming a passed-in `encounterId`.
-Remaining question: how a typed facility name resolves to a Location
-without minting duplicates on a typo. Also link the rest — Condition,
-AllergyIntolerance, MedicationStatement (`.context`) and CarePlan all
-support an encounter link and none use it today.
+they're `useState`, not FormState keys. Worth remembering: the script's
+"set but never read" side doesn't cover section-1/2 scalar state at all,
+so that whole surface needs a human read.
+
+They had nowhere to go because the wizard never created an `Encounter`,
+though an admission screening *is* one. Now: `saveAdmissionEncounter()`
+upserts an Encounter keyed `admission-encounter` with
+`period.start` = admission date and `location[0].location` → a real
+`Location`.
+
+**Facility identity hangs on a code, never a name** (`djsFacilities.ts`).
+The 13 canonical facilities from the paper form each have a permanent
+slug code plus a display name that is explicitly *safe to change* — staff
+see the short paper-form names today, and a production version may swap in
+official long-form names without moving any stored data. Consequences
+worth preserving if this is ever touched:
+
+- The dropdown is a **closed set with no free-text escape**. Standing up a
+  DJS facility takes real organizational investment, so the list changes
+  rarely and adding to it is cheap — whereas a typed fallback would
+  reintroduce exactly the duplicate-Location problem the code list
+  prevents. A facility not on the list is a data-entry error or a real
+  organizational change; both route to editing the list.
+- The `Location` is upserted **conditionally on the facility code**, so a
+  rename is a plain update, re-saving is idempotent, and two intakes
+  racing on a facility's first use converge on one resource.
+- Codes are lowercase/hyphen slugs, which also keeps them clear of the
+  FHIR search metacharacters behind the task-19 duplication bug — a reason
+  to key on codes, not a happy accident.
+- The Encounter stores **only the reference**, with no `Reference.display`.
+  FHIR permits that cached label and expects it to go stale, but since
+  renames are anticipated here and every reader resolves the Location
+  anyway, a copy would only let old Encounters render a name their
+  facility record contradicts. Built by hand rather than via
+  `createReference`, which populates `display` by default — a test caught
+  this.
+- Read-back recovers the facility from the Location's **identifier**, not
+  its name, and there's a regression test asserting a renamed facility
+  still resolves.
+
+`Encounter.class` uses v3 ActCode `IMP`: a custodial admission is a
+residential stay rather than an ambulatory visit, and ActCode has no
+juvenile-detention code. **A deliberate approximation, not a confident
+mapping** — revisit if DJS adopts a more specific value set.
+
+**Task 36 — thread the Encounter reference through every resource type.**
+Split out of task 24 on purpose. `obs()` still sets `Observation.encounter`
+from the **route param only**, so Observations saved on a normal run aren't
+linked to the Encounter the wizard now creates; Condition,
+AllergyIntolerance, MedicationStatement (`.context`) and CarePlan support
+the link and use it nowhere. **The hazard that earned this its own task:**
+the reference must be threaded explicitly like `subject`, never read from
+React state inside a handler — doing that reproduces the stale-closure bug
+that once sent `subject: undefined` on every resource in a first-time save
+(see CLAUDE.md). An `ensureEncounterRef()` mirroring `ensurePatientRef()`
+is the right shape; it changes `obs()`'s signature and every call site.
+
+**Task 37 — model the Youth Centers grouping via `Location.partOf`.**
+Purely additive, needs no facility code to change. Structural rather than
+a guessed `Location.type` code, since no canonical type for a juvenile
+facility class is known.
 
 **Task 25 — blood pressure as components, not a string.** Saved as
 `valueString: "120/80"`. FHIR models BP as a panel of two

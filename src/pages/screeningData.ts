@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import type { MedplumClient } from '@medplum/core';
+import type { MedplumClient, WithId } from '@medplum/core';
 import type {
   AllergyIntolerance,
   CarePlan,
   Condition,
   Dosage,
+  Encounter,
+  Location,
   MedicationStatement,
   Observation,
   Quantity,
@@ -18,6 +20,15 @@ import type {
  * truth for that string — the wizard writes it, this module reads it back.
  */
 export const SCREENING_ID_SYSTEM = 'http://maryland.gov/djs/admission-screening';
+
+/**
+ * Screening key for the admission Encounter itself — one per patient's
+ * screening, so the conditional upsert updates it in place rather than
+ * creating a second admission on every save. Defined here rather than in the
+ * wizard because both the write path and the read-back must agree on it; a
+ * drift between them would silently strand the admission date and facility.
+ */
+export const ADMISSION_ENCOUNTER_KEY = 'admission-encounter';
 
 /**
  * True once a resource has been withdrawn. Must stay identical to the wizard's
@@ -141,6 +152,15 @@ export interface ScreeningResources {
   allergies: AllergyIntolerance[];
   medications: MedicationStatement[];
   carePlans: CarePlan[];
+  encounters: Encounter[];
+  /**
+   * Locations referenced by `encounters` — fetched by reference, not by
+   * search, because a Location carries the *facility* identifier system, not
+   * `SCREENING_ID_SYSTEM`, so it would never match the screening filter.
+   * Read-back needs the resource itself (not just the reference) to recover a
+   * facility's `code`, which is what the form's dropdown binds to.
+   */
+  locations: Location[];
   /** screening key → its single live resource, across every type above. */
   byKey: Map<string, Resource>;
 }
@@ -206,21 +226,37 @@ export async function loadScreeningResources(
   patientId: string
 ): Promise<ScreeningResources> {
   const patientRef = `Patient/${patientId}`;
-  const [observations, conditions, allergies, medications, carePlans] = await Promise.all([
+  const [observations, conditions, allergies, medications, carePlans, encounters] = await Promise.all([
     searchScreening<Observation>(medplum, 'Observation', 'subject', patientRef),
     searchScreening<Condition>(medplum, 'Condition', 'subject', patientRef),
     searchScreening<AllergyIntolerance>(medplum, 'AllergyIntolerance', 'patient', patientRef),
     searchScreening<MedicationStatement>(medplum, 'MedicationStatement', 'subject', patientRef),
     searchScreening<CarePlan>(medplum, 'CarePlan', 'subject', patientRef),
+    searchScreening<Encounter>(medplum, 'Encounter', 'subject', patientRef),
   ]);
 
+  // Resolve the facilities those encounters point at. A missing or unreadable
+  // Location is skipped rather than thrown: the rest of a screening must still
+  // load if one reference is dangling.
+  const locationIds = [
+    ...new Set(
+      encounters
+        .flatMap((e) => e.location ?? [])
+        .map((l) => l.location?.reference?.split('/')[1])
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const locations: Location[] = (
+    await Promise.all(locationIds.map((id) => medplum.readResource('Location', id).catch(() => undefined)))
+  ).filter((l): l is WithId<Location> => Boolean(l));
+
   const byKey = new Map<string, Resource>();
-  for (const res of [...observations, ...conditions, ...allergies, ...medications, ...carePlans]) {
+  for (const res of [...observations, ...conditions, ...allergies, ...medications, ...carePlans, ...encounters]) {
     const key = screeningKey(res);
     if (key) {
       byKey.set(key, res);
     }
   }
 
-  return { observations, conditions, allergies, medications, carePlans, byKey };
+  return { observations, conditions, allergies, medications, carePlans, encounters, locations, byKey };
 }

@@ -1,5 +1,5 @@
 import { createReference, WithId } from '@medplum/core';
-import { Encounter, Observation, Reference } from '@medplum/fhirtypes';
+import { Encounter, Location, Observation, Reference } from '@medplum/fhirtypes';
 import { Patient } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react-hooks';
 import type { JSX } from 'react';
@@ -21,7 +21,14 @@ import { useFormState } from './formState';
 // each resource under this system's identifier (derived from the field that
 // produced it, so a re-save updates in place rather than duplicating), and the
 // summary/read-back loads it back by the same key.
-import { buildDosage, isScreeningRetracted, loadScreeningResources, SCREENING_ID_SYSTEM } from './screeningData';
+import {
+  ADMISSION_ENCOUNTER_KEY,
+  buildDosage,
+  isScreeningRetracted,
+  loadScreeningResources,
+  SCREENING_ID_SYSTEM,
+} from './screeningData';
+import { DJS_FACILITIES, DJS_FACILITY_SYSTEM, facilityByCode } from './djsFacilities';
 import { hydrateScreeningForm } from './hydrateScreening';
 
 /**
@@ -88,7 +95,9 @@ export function AdmissionHealthScreeningWizard({
   const form = useFormState();
 
   const [patient, setPatient] = useState<Patient | undefined>();
-  const [facilityName, setFacilityName] = useState('');
+  // The facility's stable code, not its name — see djsFacilities.ts. Storing
+  // the name here instead would make a rename look like a different facility.
+  const [facilityCode, setFacilityCode] = useState('');
 
   // ---- Section 1 state ----
   const [lastName, setLastName] = useState('');
@@ -144,6 +153,8 @@ export function AdmissionHealthScreeningWizard({
       if (scalars.firstName !== undefined) setFirstName(scalars.firstName);
       if (scalars.middleInitial !== undefined) setMiddleInitial(scalars.middleInitial);
       if (scalars.dob !== undefined) setDob(scalars.dob);
+      if (scalars.admissionDate !== undefined) setAdmissionDate(scalars.admissionDate);
+      if (scalars.facilityCode !== undefined) setFacilityCode(scalars.facilityCode);
       if (scalars.sex !== undefined) setSex(scalars.sex);
       if (scalars.hispanic !== undefined) setHispanic(scalars.hispanic);
       if (scalars.temp !== undefined) setTemp(scalars.temp);
@@ -436,9 +447,86 @@ export function AdmissionHealthScreeningWizard({
     return createReference(patient?.id ? (patient as WithId<Patient>) : await savePatientRecord());
   }
 
+  /**
+   * Materializes the selected facility as a real `Location` and returns a
+   * reference to it.
+   *
+   * Upserted conditionally on the facility **code**, never its name: the code
+   * is permanent, the name is a display label staff may want changed later
+   * (see `djsFacilities.ts`). Keying on the name would mint a second Location
+   * the first time a facility is renamed, silently splitting its admissions
+   * across two records. Keying on the code makes a rename a plain update, and
+   * makes this idempotent and safe against two intakes racing on a facility's
+   * first use.
+   *
+   * No `escapeSearchToken` needed here — codes are constrained to
+   * lowercase/hyphen slugs, so they can't contain the search metacharacters
+   * that broke identifier lookups in task 19. That constraint is a reason to
+   * key on codes, not an accident of them.
+   */
+  async function ensureFacilityLocation(code: string): Promise<Reference<Location> | undefined> {
+    const facility = facilityByCode(code);
+    if (!facility) {
+      return undefined;
+    }
+    const saved = await medplum.upsertResource<Location>(
+      {
+        resourceType: 'Location',
+        status: 'active',
+        identifier: [{ system: DJS_FACILITY_SYSTEM, value: facility.code }],
+        name: facility.name,
+      } as Location,
+      { identifier: `${DJS_FACILITY_SYSTEM}|${facility.code}` }
+    );
+    // Built by hand rather than with `createReference`, which would populate
+    // `Reference.display` with the facility's name. FHIR permits that cached
+    // label and expects it to go stale — but here display names are expected
+    // to change (short paper-form names now, official ones later), and every
+    // reader resolves the Location anyway, so the copy buys nothing and would
+    // leave old Encounters rendering a name their facility record contradicts.
+    return { reference: `Location/${saved.id}` };
+  }
+
+  /**
+   * Writes the admission `Encounter` — the resource that finally gives the
+   * admission date and facility somewhere to live. Both were captured in the
+   * JSX and read by no save handler until now (the same silent-data-loss class
+   * as the Epi-Pen and task-18/19 fields), because the wizard had no Encounter
+   * to hang them on despite an admission screening being exactly that.
+   *
+   * `status` and `class` are required by FHIR. `class` uses v3 ActCode `IMP`:
+   * a custodial admission is a residential stay rather than an ambulatory
+   * visit, and ActCode has no juvenile-detention-specific code. Recorded as a
+   * deliberate approximation, not a confident mapping — revisit if DJS adopts
+   * a more specific value set.
+   */
+  async function saveAdmissionEncounter(subject: Reference<Patient>): Promise<void> {
+    const locationRef = facilityCode ? await ensureFacilityLocation(facilityCode) : undefined;
+    await medplum.upsertResource<Encounter>(
+      {
+        resourceType: 'Encounter',
+        status: 'in-progress',
+        class: {
+          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+          code: 'IMP',
+          display: 'inpatient encounter',
+        },
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: ADMISSION_ENCOUNTER_KEY }],
+        period: admissionDate ? { start: admissionDate } : undefined,
+        // Only the reference is stored — never a copy of the facility's name.
+        // A second copy would go stale the moment a display name changed.
+        location: locationRef ? [{ location: locationRef }] : undefined,
+      } as Encounter,
+      upsertQuery(ADMISSION_ENCOUNTER_KEY, subject)
+    );
+  }
+
   async function saveDemographics(): Promise<void> {
     const subject = createReference(await savePatientRecord());
     const initials = form.text('mandated-reporter-initials');
+
+    await saveAdmissionEncounter(subject);
 
     await saveObservationSet(subject, [
       { code: 'Hair color', value: form.text('hair-color') ? { valueString: form.text('hair-color') } : undefined },
@@ -810,7 +898,13 @@ export function AdmissionHealthScreeningWizard({
         />
 
         <div className="main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <PatientBand patient={patient} facilityName={facilityName} admissionDate={admissionDate} />
+          {/* Resolved from the code at render time rather than stored, so the
+              band can never show a stale facility name. */}
+          <PatientBand
+            patient={patient}
+            facilityName={facilityByCode(facilityCode)?.name ?? ''}
+            admissionDate={admissionDate}
+          />
 
           <div className="djs-content">
             {activeStep === 1 && (
@@ -823,7 +917,20 @@ export function AdmissionHealthScreeningWizard({
                     <Field label="MI"><input type="text" value={middleInitial} onChange={(e) => setMiddleInitial(e.target.value)} /></Field>
                     <Field label="Date of birth"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>
                     <Field label="Date of admission"><input type="date" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} /></Field>
-                    <Field label="Facility"><input type="text" value={facilityName} onChange={(e) => setFacilityName(e.target.value)} /></Field>
+                    <Field label="Facility">
+                      {/* Closed set, no free-text escape: a typed facility name
+                          would reintroduce the duplicate-Location problem the
+                          canonical code list exists to prevent. See
+                          djsFacilities.ts. */}
+                      <select value={facilityCode} onChange={(e) => setFacilityCode(e.target.value)}>
+                        <option value="">— Select facility —</option>
+                        {DJS_FACILITIES.map((f) => (
+                          <option key={f.code} value={f.code}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
                   </FieldGrid>
                 </Card>
                 <Card index="02" title="Sex, birth & ethnicity">

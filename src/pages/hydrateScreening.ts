@@ -8,7 +8,8 @@ import type {
   Observation,
   Patient,
 } from '@medplum/fhirtypes';
-import { dosageToFields, screeningKey, type ScreeningResources } from './screeningData';
+import { DJS_FACILITY_SYSTEM } from './djsFacilities';
+import { ADMISSION_ENCOUNTER_KEY, dosageToFields, screeningKey, type ScreeningResources } from './screeningData';
 
 /**
  * The wizard's dedicated `useState` fields (sections 1–2) that read-back can
@@ -24,6 +25,12 @@ export interface HydratedScalars {
   firstName?: string;
   middleInitial?: string;
   dob?: string;
+  admissionDate?: string;
+  /**
+   * The facility's stable `code`, never its display name — the dropdown binds
+   * to codes, and a name is only a mutable label (see `djsFacilities.ts`).
+   */
+  facilityCode?: string;
   sex?: string;
   hispanic?: string;
   temp?: string;
@@ -411,6 +418,22 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
   const carePlan = (data.carePlans as CarePlan[]).find((c) => screeningKey(c) === 'nursing-plan');
   if (carePlan?.description) {
     checks['nursing-plan'] = carePlan.description.split('; ').filter(Boolean);
+  }
+
+  // ---- Encounter: admission date and facility ----
+  // The facility comes back as its stable `code`, recovered from the
+  // referenced Location's identifier — never from `Location.name`, which is a
+  // mutable display label. Renaming a facility must not break read-back, and
+  // matching on the name would do exactly that.
+  const encounter = data.encounters.find((e) => screeningKey(e) === ADMISSION_ENCOUNTER_KEY);
+  if (encounter?.period?.start) {
+    scalars.admissionDate = encounter.period.start;
+  }
+  const locationId = encounter?.location?.[0]?.location?.reference?.split('/')[1];
+  const location = locationId ? data.locations.find((l) => l.id === locationId) : undefined;
+  const facilityCode = location?.identifier?.find((i) => i.system === DJS_FACILITY_SYSTEM)?.value;
+  if (facilityCode) {
+    scalars.facilityCode = facilityCode;
   }
 
   // ---- Medications table ----
