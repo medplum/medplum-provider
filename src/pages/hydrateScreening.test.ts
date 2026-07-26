@@ -43,6 +43,105 @@ describe('hydrateScreeningForm', () => {
     expect(scalars.sex).toBe('female');
   });
 
+  describe('demographics extensions (task 17 step 4)', () => {
+    const BIRTHPLACE_URL = 'http://hl7.org/fhir/StructureDefinition/patient-birthPlace';
+    const ETHNICITY_URL = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity';
+    const RACE_URL = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race';
+    const INTERPRETER_URL = 'http://example.org/fhir/StructureDefinition/needs-interpreter';
+
+    test('maps birthplace, ethnicity, and needs-interpreter extensions', () => {
+      const patient: Patient = {
+        resourceType: 'Patient',
+        extension: [
+          { url: BIRTHPLACE_URL, valueAddress: { text: 'Baltimore, MD' } },
+          { url: ETHNICITY_URL, valueCodeableConcept: { text: 'Hispanic or Latino' } },
+          { url: INTERPRETER_URL, valueBoolean: true },
+        ],
+      };
+
+      const { scalars, texts, checks } = hydrateScreeningForm(empty(), patient);
+
+      expect(texts['birth-place']).toBe('Baltimore, MD');
+      expect(scalars.hispanic).toBe('yes');
+      expect(checks['interpreter']).toEqual(['Needs interpreter']);
+    });
+
+    test('maps "Not Hispanic or Latino" to hispanic: no', () => {
+      const patient: Patient = {
+        resourceType: 'Patient',
+        extension: [{ url: ETHNICITY_URL, valueCodeableConcept: { text: 'Not Hispanic or Latino' } }],
+      };
+
+      const { scalars } = hydrateScreeningForm(empty(), patient);
+
+      expect(scalars.hispanic).toBe('no');
+    });
+
+    test('maps race checkboxes for known items only', () => {
+      const patient: Patient = {
+        resourceType: 'Patient',
+        extension: [{ url: RACE_URL, valueCodeableConcept: { text: 'Black or African American, White' } }],
+      };
+
+      const { checks, checkTexts } = hydrateScreeningForm(empty(), patient);
+
+      expect(checks['race']).toEqual(['Black or African American', 'White']);
+      expect(checkTexts['race']).toBeUndefined();
+    });
+
+    test('treats a token not on the race grid as "Other" free text', () => {
+      const patient: Patient = {
+        resourceType: 'Patient',
+        extension: [{ url: RACE_URL, valueCodeableConcept: { text: 'White, Cherokee' } }],
+      };
+
+      const { checks, checkTexts } = hydrateScreeningForm(empty(), patient);
+
+      expect(checks['race']).toEqual(['White', 'Other']);
+      expect(checkTexts['race']).toEqual({ Other: 'Cherokee' });
+    });
+
+    test('rejoins multiple unrecognized tokens into one "Other" value (documented limitation)', () => {
+      // If the original "Other" free text itself contained a comma, splitting
+      // the saved list on ", " breaks it into more than one token — this is
+      // the same comma hazard as task 20. Rejoining with ", " gets the
+      // content back even if not byte-for-byte identical to what was typed.
+      const patient: Patient = {
+        resourceType: 'Patient',
+        extension: [{ url: RACE_URL, valueCodeableConcept: { text: 'White, Cherokee, Choctaw' } }],
+      };
+
+      const { checks, checkTexts } = hydrateScreeningForm(empty(), patient);
+
+      expect(checks['race']).toEqual(['White', 'Other']);
+      expect(checkTexts['race']).toEqual({ Other: 'Cherokee, Choctaw' });
+    });
+
+    test('returns no race/ethnicity/interpreter fields when there are no such extensions', () => {
+      const patient: Patient = { resourceType: 'Patient' };
+
+      const { scalars, checks, texts } = hydrateScreeningForm(empty(), patient);
+
+      expect(scalars.hispanic).toBeUndefined();
+      expect(checks['race']).toBeUndefined();
+      expect(checks['interpreter']).toBeUndefined();
+      expect(texts['birth-place']).toBeUndefined();
+    });
+  });
+
+  test('maps hair and eye colour Observations into their text keys', () => {
+    const data = empty();
+    data.observations = [
+      obs('Hair color', 'Hair color', { valueString: 'Brown' }),
+      obs('Eye color', 'Eye color', { valueString: 'Green' }),
+    ];
+
+    const { texts } = hydrateScreeningForm(data, undefined);
+
+    expect(texts['hair-color']).toBe('Brown');
+    expect(texts['eye-color']).toBe('Green');
+  });
+
   test('maps vitals observations to their scalar fields', () => {
     const data = empty();
     data.observations = [

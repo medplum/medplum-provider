@@ -145,6 +145,7 @@ export function AdmissionHealthScreeningWizard({
       if (scalars.middleInitial !== undefined) setMiddleInitial(scalars.middleInitial);
       if (scalars.dob !== undefined) setDob(scalars.dob);
       if (scalars.sex !== undefined) setSex(scalars.sex);
+      if (scalars.hispanic !== undefined) setHispanic(scalars.hispanic);
       if (scalars.temp !== undefined) setTemp(scalars.temp);
       if (scalars.pulse !== undefined) setPulse(scalars.pulse);
       if (scalars.resp !== undefined) setResp(scalars.resp);

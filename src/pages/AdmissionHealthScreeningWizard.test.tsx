@@ -201,6 +201,12 @@ function inlineTextInput(checkboxEl: HTMLInputElement): HTMLInputElement {
   return input as HTMLInputElement;
 }
 
+/** The label of whichever ChipGroup option is currently active for the field with this label. */
+function activeChipLabel(fieldLabel: string): string | undefined {
+  const container = screen.getByText(fieldLabel).closest('.djs-field');
+  return container?.querySelector('button.djs-chip.active')?.textContent ?? undefined;
+}
+
 /** Clicks a section's save button and waits for the save to settle (button re-enabled). */
 async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName: RegExp): Promise<void> {
   const button = (): HTMLElement => screen.getByRole('button', { name: buttonName });
@@ -583,6 +589,56 @@ describe('AdmissionHealthScreeningWizard', () => {
       const otherCheckbox = checkboxInCard('Appearance & mental status', 'Other');
       await waitFor(() => expect(otherCheckbox.checked).toBe(true));
       expect(inlineTextInput(otherCheckbox).value).toBe('Flat affect');
+    });
+
+    // Task 17 step 4: birthplace, ethnicity, needs-interpreter, race, and hair/
+    // eye colour all save correctly already; none were read back until now.
+    test('populates demographics extensions and hair/eye colour on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family: 'Osei' }],
+        extension: [
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/patient-birthPlace',
+            valueAddress: { text: 'Baltimore, MD' },
+          },
+          {
+            url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity',
+            valueCodeableConcept: { text: 'Hispanic or Latino' },
+          },
+          {
+            url: 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race',
+            valueCodeableConcept: { text: 'Black or African American, Cherokee' },
+          },
+          {
+            url: 'http://example.org/fhir/StructureDefinition/needs-interpreter',
+            valueBoolean: true,
+          },
+        ],
+      });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Hair color' }],
+        code: { text: 'Hair color' },
+        valueString: 'Black',
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await waitFor(() => expect(activeChipLabel('Hispanic / Latino')).toBe('Yes'));
+      expect(fieldInput('Place of birth').value).toBe('Baltimore, MD');
+      expect(checkbox('Needs interpreter').checked).toBe(true);
+      const otherRaceCheckbox = checkboxInCard('Language & race', 'Other');
+      expect(otherRaceCheckbox.checked).toBe(true);
+      expect(inlineTextInput(otherRaceCheckbox).value).toBe('Cherokee');
+      expect(checkbox('Black or African American').checked).toBe(true);
+      expect(fieldInput('Color of hair').value).toBe('Black');
     });
   });
 

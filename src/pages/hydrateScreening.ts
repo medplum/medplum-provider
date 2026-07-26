@@ -18,6 +18,7 @@ export interface HydratedScalars {
   middleInitial?: string;
   dob?: string;
   sex?: string;
+  hispanic?: string;
   temp?: string;
   pulse?: string;
   resp?: string;
@@ -88,7 +89,28 @@ const TEXT_CODE_TO_FIELD: Record<string, string> = {
   // below reads either, so this mapping doesn't need to know which.
   'Admission screening sign-off date/time': 'signoff-datetime',
   'Admission screening review date': 'review-date',
+  'Hair color': 'hair-color',
+  'Eye color': 'eye-color',
 };
+
+// Patient.extension URLs written by savePatientRecord — must match exactly.
+const BIRTHPLACE_EXT_URL = 'http://hl7.org/fhir/StructureDefinition/patient-birthPlace';
+const ETHNICITY_EXT_URL = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity';
+const RACE_EXT_URL = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-race';
+const INTERPRETER_EXT_URL = 'http://example.org/fhir/StructureDefinition/needs-interpreter';
+
+/** The race grid's own checklist items (excluding "Other"), so an unrecognized token in the saved list must be free text. */
+const KNOWN_RACE_ITEMS = [
+  'Black or African American',
+  'White',
+  'Asian',
+  'American Indian or Alaska Native',
+  'Native Hawaiian or Pacific Islander',
+];
+
+function findExtension(patient: Patient | undefined, url: string): NonNullable<Patient['extension']>[number] | undefined {
+  return patient?.extension?.find((e) => e.url === url);
+}
 
 /** The item value a checklist Observation stands for — the part of its key after `::`. */
 function itemFromKey(res: Observation): string | undefined {
@@ -123,10 +145,6 @@ function textOrDateTime(obs: Observation): string | undefined {
  * - The sign-off Nurse/Physician signatures and mandated-reporter statement —
  *   formatted strings, not yet parsed back (disposition-notes/
  *   signoff-datetime/review-date from that same section ARE mapped, below).
- * - Hair/eye colour, race, interpreter, birthplace, and the ethnicity chip —
- *   additional demographics, not yet mapped. This includes `race`'s own
- *   Other::text free text — it's a Patient extension (valueCodeableConcept),
- *   not an Observation, and out of scope until race itself is mapped.
  * - The 6-cell vision-acuity grid — not yet mapped.
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
@@ -152,6 +170,45 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
   }
   if (patient?.gender === 'male' || patient?.gender === 'female') {
     scalars.sex = patient.gender;
+  }
+
+  const ethnicityText = findExtension(patient, ETHNICITY_EXT_URL)?.valueCodeableConcept?.text;
+  if (ethnicityText === 'Hispanic or Latino') {
+    scalars.hispanic = 'yes';
+  } else if (ethnicityText === 'Not Hispanic or Latino') {
+    scalars.hispanic = 'no';
+  }
+
+  const birthPlace = findExtension(patient, BIRTHPLACE_EXT_URL)?.valueAddress?.text;
+  if (birthPlace) {
+    texts['birth-place'] = birthPlace;
+  }
+
+  if (findExtension(patient, INTERPRETER_EXT_URL)?.valueBoolean === true) {
+    checks['interpreter'] = ['Needs interpreter'];
+  }
+
+  const raceText = findExtension(patient, RACE_EXT_URL)?.valueCodeableConcept?.text;
+  if (raceText) {
+    // Written by savePatientRecord as
+    // `raceItems.map((r) => checkTextMap('race')[r] || r).join(', ')` — the
+    // free text typed for "Other" takes the place of the literal word
+    // "Other" in this list, so a token that isn't one of the grid's own
+    // labels must be that free text, not a race category we don't recognize.
+    // Known limitation: if the typed "Other" text itself contains a comma,
+    // it was split into multiple tokens here and gets rejoined below rather
+    // than reconstructed exactly — same class of comma hazard as task 20.
+    const tokens = raceText.split(', ').filter(Boolean);
+    const knownItems = tokens.filter((t) => KNOWN_RACE_ITEMS.includes(t));
+    const otherTokens = tokens.filter((t) => !KNOWN_RACE_ITEMS.includes(t));
+    const raceItems = [...knownItems];
+    if (otherTokens.length > 0) {
+      raceItems.push('Other');
+      (checkTexts['race'] ??= {})['Other'] = otherTokens.join(', ');
+    }
+    if (raceItems.length > 0) {
+      checks['race'] = raceItems;
+    }
   }
 
   // ---- Observations: vitals, pain, complaint, checklist items, text fields ----
