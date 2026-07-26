@@ -34,8 +34,19 @@ import { MedplumProvider } from '@medplum/react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { AdmissionHealthScreeningWizard } from './AdmissionHealthScreeningWizard';
+
+// DIAGNOSTIC (temporary): every runSave() catches any error from the whole
+// save chain and only ever shows it as a UI toast — so if something throws
+// anywhere before reaching the point a test is checking (not necessarily
+// updateResource itself), neither the test nor a plain run ever sees why.
+// Mocking this captures whatever runSave actually caught, for any save, in
+// this file only. Remove once the cause behind failure 1 is confirmed.
+vi.mock('../utils/notifications', () => ({
+  showSuccessNotification: vi.fn(),
+  showErrorNotification: vi.fn(),
+}));
 
 // Duplicated from AdmissionHealthScreeningWizard.tsx (and from
 // AdmissionHealthScreeningWizard.test.tsx / .fieldIntegrity.test.ts) rather
@@ -287,9 +298,59 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       const codesAfterCheck = afterCheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
       expect(codesAfterCheck).not.toContain('entered-in-error');
 
+      // DIAGNOSTIC (temporary): the previous two rounds ruled out a rejected
+      // updateResource call AND a thrown/swallowed exception — the save chain
+      // completes cleanly, but retractStale's loop never reaches
+      // updateResource at all. That means either (a) its own search (patient
+      // param only) comes back empty even though the identical search below
+      // with an added identifier filter finds the resource, or (b) the search
+      // finds it but the liveKeys.has(key) skip fires — meaning
+      // form.checkedItems('allergy') still reports the item checked after
+      // unchecking it. Spying on searchResources distinguishes the two.
+      // Remove once the cause is confirmed and restore the plain assertions
+      // below (still present, just unreachable past this throw for now).
+      const searchSpy = vi.spyOn(medplum, 'searchResources');
+      const updateSpy = vi.spyOn(medplum, 'updateResource');
+
       // Uncheck it and save again — it must be withdrawn, not deleted.
       await user.click(checkbox('Latex allergy'));
       await saveSection(user, /save health status/i);
+
+      const allergySearchCalls = searchSpy.mock.calls
+        .map((call, i) => ({ call, result: searchSpy.mock.results[i] }))
+        .filter(({ call }) => call[0] === 'AllergyIntolerance');
+
+      if (allergySearchCalls.length === 0) {
+        throw new Error(
+          "retractStale never called medplum.searchResources('AllergyIntolerance', ...) at all during this save."
+        );
+      }
+
+      const last = allergySearchCalls[allergySearchCalls.length - 1];
+      const lastResult = (await last.result.value) as { id?: string; identifier?: unknown }[];
+      throw new Error(
+        `retractStale's AllergyIntolerance search ran with query ${JSON.stringify(last.call[1])} and returned ` +
+          `${lastResult.length} result(s): ${JSON.stringify(lastResult.map((r) => ({ id: r.id, identifier: r.identifier })))}`
+      );
+
+      // eslint-disable-next-line no-unreachable -- kept for the next round once the diagnostic above is removed
+      if (updateSpy.mock.calls.length === 0) {
+        throw new Error(
+          'medplum.updateResource was never called during the uncheck-and-save — retractStale did not attempt a retraction at all (a different bug than a rejected call).'
+        );
+      }
+
+      for (const call of updateSpy.mock.results) {
+        if (call.type === 'throw') {
+          throw new Error(`updateResource threw synchronously: ${String(call.value)}`, { cause: call.value });
+        }
+        try {
+          await call.value;
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : JSON.stringify(err);
+          throw new Error(`updateResource was rejected by the server: ${detail}`, { cause: err });
+        }
+      }
 
       const afterUncheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
       expect(afterUncheck).toHaveLength(1);
