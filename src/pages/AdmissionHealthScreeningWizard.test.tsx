@@ -207,6 +207,22 @@ function activeChipLabel(fieldLabel: string): string | undefined {
   return container?.querySelector('button.djs-chip.active')?.textContent ?? undefined;
 }
 
+/**
+ * The vision screen's 6 acuity cells are plain `<td><input placeholder=
+ * "20/__">` with no `<label>`/`.djs-field` wrapper, so they can't use
+ * `fieldInput`. DOM order matches `visionFields` in
+ * AdmissionHealthScreeningWizard.tsx exactly: without-glasses (left, right,
+ * both), then with-glasses (left, right, both).
+ */
+function visionAcuityInput(index: 0 | 1 | 2 | 3 | 4 | 5): HTMLInputElement {
+  const inputs = document.querySelectorAll<HTMLInputElement>('input[placeholder="20/__"]');
+  const input = inputs[index];
+  if (!input) {
+    throw new Error(`Could not find vision-acuity input at index ${index}`);
+  }
+  return input;
+}
+
 /** Clicks a section's save button and waits for the save to settle (button re-enabled). */
 async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName: RegExp): Promise<void> {
   const button = (): HTMLElement => screen.getByRole('button', { name: buttonName });
@@ -639,6 +655,41 @@ describe('AdmissionHealthScreeningWizard', () => {
       expect(inlineTextInput(otherRaceCheckbox).value).toBe('Cherokee');
       expect(checkbox('Black or African American').checked).toBe(true);
       expect(fieldInput('Color of hair').value).toBe('Black');
+    });
+
+    // Task 17 step 5: vision acuity (6 fields, saveVitals) and glasses
+    // history (saveVitals) save correctly already; neither was read back.
+    test('populates the vision-acuity table and glasses history on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Kim' }] });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Visual acuity, left eye, without correction' }],
+        code: { text: 'Visual acuity, left eye, without correction' },
+        valueString: '20/40',
+      } as Resource);
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'History of prescribed glasses/contacts' }],
+        code: { text: 'History of prescribed glasses/contacts' },
+        valueString: 'Wears reading glasses',
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      await waitFor(() => expect(visionAcuityInput(0).value).toBe('20/40'));
+      await waitFor(() => expect(activeChipLabel('Given glasses or corrective contact lenses in the past?')).toBe('Yes'));
+      expect(fieldTextarea('When & where prescribed, location & condition of glasses/lenses').value).toBe(
+        'Wears reading glasses'
+      );
     });
   });
 

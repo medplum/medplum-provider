@@ -68,6 +68,7 @@ const PAIN_CODE = 'Pain severity - 0-10 verbal numeric rating';
 const COMPLAINT_CODE = 'Chief complaint';
 const DENTAL_EXAM_CODE = 'Last dental exam';
 const VISION_EXAM_CODE = 'Last vision exam';
+const GLASSES_HISTORY_CODE = 'History of prescribed glasses/contacts';
 const ROS_COMMENTS_CODE = 'Review of systems: additional comments';
 
 /**
@@ -91,6 +92,14 @@ const TEXT_CODE_TO_FIELD: Record<string, string> = {
   'Admission screening review date': 'review-date',
   'Hair color': 'hair-color',
   'Eye color': 'eye-color',
+  // The vision-acuity grid (saveVitals's visionFields loop) — 6 fields, each
+  // a bare valueString, no parsing needed.
+  'Visual acuity, left eye, without correction': 'vision-nocorr-left',
+  'Visual acuity, right eye, without correction': 'vision-nocorr-right',
+  'Visual acuity, both eyes, without correction': 'vision-nocorr-both',
+  'Visual acuity, left eye, with correction': 'vision-corr-left',
+  'Visual acuity, right eye, with correction': 'vision-corr-right',
+  'Visual acuity, both eyes, with correction': 'vision-corr-both',
 };
 
 // Patient.extension URLs written by savePatientRecord — must match exactly.
@@ -145,7 +154,6 @@ function textOrDateTime(obs: Observation): string | undefined {
  * - The sign-off Nurse/Physician signatures and mandated-reporter statement —
  *   formatted strings, not yet parsed back (disposition-notes/
  *   signoff-datetime/review-date from that same section ARE mapped, below).
- * - The 6-cell vision-acuity grid — not yet mapped.
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
   const scalars: HydratedScalars = {};
@@ -251,6 +259,21 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
       const value = textOrDateTime(obs);
       if (value !== undefined) {
         texts[textField] = value;
+      }
+      continue;
+    }
+
+    if (code === GLASSES_HISTORY_CODE && obs.valueString) {
+      // Save side writes: chip 'yes' but no detail typed -> valueString
+      // literally 'Yes' (see saveVitals: `text('vision-glasses-detail') ||
+      // 'Yes'`). That's already ambiguous with someone genuinely typing
+      // "Yes" as their answer — the read side can't resolve what the write
+      // side didn't preserve, so it mirrors the same imprecision: the chip
+      // is always restored, the detail only when the value isn't literally
+      // the fallback string.
+      chips['vision-glasses-past'] = 'yes';
+      if (obs.valueString !== 'Yes') {
+        texts['vision-glasses-detail'] = obs.valueString;
       }
       continue;
     }

@@ -142,6 +142,72 @@ describe('hydrateScreeningForm', () => {
     expect(texts['eye-color']).toBe('Green');
   });
 
+  test('maps all 6 vision-acuity Observations into their text keys (task 17 step 5)', () => {
+    const data = empty();
+    data.observations = [
+      obs('Visual acuity, left eye, without correction', 'Visual acuity, left eye, without correction', {
+        valueString: '20/40',
+      }),
+      obs('Visual acuity, right eye, without correction', 'Visual acuity, right eye, without correction', {
+        valueString: '20/30',
+      }),
+      obs('Visual acuity, both eyes, without correction', 'Visual acuity, both eyes, without correction', {
+        valueString: '20/30',
+      }),
+      obs('Visual acuity, left eye, with correction', 'Visual acuity, left eye, with correction', {
+        valueString: '20/20',
+      }),
+      obs('Visual acuity, right eye, with correction', 'Visual acuity, right eye, with correction', {
+        valueString: '20/20',
+      }),
+      obs('Visual acuity, both eyes, with correction', 'Visual acuity, both eyes, with correction', {
+        valueString: '20/20',
+      }),
+    ];
+
+    const { texts } = hydrateScreeningForm(data, undefined);
+
+    expect(texts['vision-nocorr-left']).toBe('20/40');
+    expect(texts['vision-nocorr-right']).toBe('20/30');
+    expect(texts['vision-nocorr-both']).toBe('20/30');
+    expect(texts['vision-corr-left']).toBe('20/20');
+    expect(texts['vision-corr-right']).toBe('20/20');
+    expect(texts['vision-corr-both']).toBe('20/20');
+  });
+
+  describe('glasses history (task 17 step 5)', () => {
+    test('restores the chip and detail when a real detail was typed', () => {
+      const data = empty();
+      data.observations = [
+        obs('History of prescribed glasses/contacts', 'History of prescribed glasses/contacts', {
+          valueString: 'Prescribed bifocals in 2022, wears them daily',
+        }),
+      ];
+
+      const { chips, texts } = hydrateScreeningForm(data, undefined);
+
+      expect(chips['vision-glasses-past']).toBe('yes');
+      expect(texts['vision-glasses-detail']).toBe('Prescribed bifocals in 2022, wears them daily');
+    });
+
+    test('restores just the chip, no detail, when the value is the literal fallback "Yes"', () => {
+      // Save side writes this exact fallback when the chip is 'yes' but no
+      // detail was typed — see the doc comment on GLASSES_HISTORY_CODE for
+      // why this can't be told apart from someone genuinely typing "Yes".
+      const data = empty();
+      data.observations = [
+        obs('History of prescribed glasses/contacts', 'History of prescribed glasses/contacts', {
+          valueString: 'Yes',
+        }),
+      ];
+
+      const { chips, texts } = hydrateScreeningForm(data, undefined);
+
+      expect(chips['vision-glasses-past']).toBe('yes');
+      expect(texts['vision-glasses-detail']).toBeUndefined();
+    });
+  });
+
   test('maps vitals observations to their scalar fields', () => {
     const data = empty();
     data.observations = [
