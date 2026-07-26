@@ -57,26 +57,42 @@ requirement on Medplum.
 
 ## Open
 
-### Task 19 — save `disposition-notes` / `signoff-datetime` / `review-date` (data loss) — **do first**
+### Task 19 — save `disposition-notes` / `signoff-datetime` / `review-date` — **DONE** (`782004e`)
 
-Found while scoping task 17: three fields in `saveDiagnosisDisposition`'s
-JSX (`AdmissionHealthScreeningWizard.tsx`, Sign-off/Nursing-plan cards,
-~line 1003–1012) are rendered via `form.text('disposition-notes'
-/'signoff-datetime'/'review-date')` but **read by no save handler** —
-same silent-data-loss class as task 18 (epipen, chronic-providers).
-Confirmed by reading `saveDiagnosisDisposition` (~line 676): it only reads
-`dx1`–`dx4`, `nursing-plan`, `nurse-signature`, `physician-signature`,
-`health-alerts`.
+Same silent-data-loss class as task 18: rendered in the JSX, read by no
+save handler. Fixed via `saveObservationSet` with stable codes
+(`'Disposition: additional notes'`, `'Admission screening sign-off
+date/time'`, `'Admission screening review date'` — note these are
+**not** the on-screen labels verbatim, see below). `review-date` uses
+`valueDateTime`, not `valueDate` — `Observation.value[x]` has no
+`valueDate` variant, and FHIR's `dateTime` type accepts a date-only
+string. Guarded by a persistence test following task 18's pattern;
+date/datetime-local inputs are set via `fireEvent.change`, not
+`userEvent.type`, which is unreliable for those input types in jsdom.
 
-Fix the same way task 18 did: add each as an `obs()`/`saveObservationSet`
-write in `saveDiagnosisDisposition`, with its own stable `code.text` (so it
-gets upsert + retraction like everything else), then a focused test that
-fills all three via the UI and asserts the Observations exist — the
-field-integrity grep **cannot** catch this class (a JSX `value=` read
-counts as a read to it).
+**A real bug found while writing that test, not caused by it — fixed in the
+same commit:** the disposition-notes label contains commas, and every
+identifier here is derived from `code.text`. FHIR search treats an
+unescaped comma inside a token value as an OR-separator, so a
+comma-containing identifier value silently matches nothing. That's not
+just a lookup problem — `upsertQuery` uses the same derived value as its
+**conditional-PUT match criteria**, so any checklist item whose real-world
+name contains a comma (`"Insect allergy (bee, wasp, ant)"`, `"Measles,
+mumps, or rubella"`, `"Viral hepatitis A, B, or C"` — several are on the
+actual form) **silently duplicated on every resave instead of updating in
+place**, defeating task 8's whole guarantee. Confirmed live against
+`MockClient.upsertResource` before fixing, mutation-verified after.
 
-**This blocks half of task 17 below** — read-back can't restore a field
-that was never persisted. Do this one first.
+Fix: `escapeSearchToken()` backslash-escapes `,|$\` in the search token
+only — stored `identifier.value` stays exact. The task-19 field itself was
+also renamed to a comma-free code, matching the convention already used
+elsewhere, rather than relying on escaping when a clean name was available.
+
+**Follow-up logged as task 20**: audit whether any other code path builds
+a search query from one of these item names without going through
+`escapeSearchToken`, and consider promoting it to a shared export in
+`screeningData.ts` (alongside `SCREENING_ID_SYSTEM`) so future write paths
+can't forget it.
 
 ### Task 17 — extend form read-back to the remaining fields
 
@@ -87,18 +103,13 @@ already there. A few fields still come back blank — either because they're
 lossy to reverse, weren't mapped yet, or (task 19) aren't saved yet.
 Suggested order, easiest/highest-value first:
 
-1. **The four task-18 free-text fields** — `chronic-providers`,
-   `chronic-pcp`, `chronic-comments`, `injuries-detail`. These already save
-   as plain Observations with a fixed `code.text` (see task 18's commit
-   `abd1961` for the exact codes: `'Doctors/specialists managing chronic
-   conditions'`, `'Primary care provider'`, `'Chronic conditions:
-   additional comments'`, `'Injuries/trauma: details'`). Trivial
-   `valueString` → `texts['chronic-providers']` etc. mappings, same pattern
-   as the existing `DENTAL_EXAM`/`ROS_COMMENTS` entries in
-   `hydrateScreening.ts`. Do these first — no ambiguity, fastest win.
+1. **The four task-18 free-text fields** — **DONE** (`56e08ce`). Mapped via
+   a new `TEXT_CODE_TO_FIELD` lookup table + `textOrDateTime()` helper in
+   `hydrateScreening.ts`. 7 unit tests + 1 integration test.
 
-2. **The three task-19 fields**, once task 19 lands and their `code.text`
-   values are fixed — same trivial mapping as above.
+2. **The three task-19 fields** — **DONE** (`56e08ce`), same commit/mapping
+   table as step 1 (`textOrDateTime` reads whichever of `valueString`/
+   `valueDateTime` the field used, so one generic branch covers all seven).
 
 3. **`Other::` free text on checklist items.** Currently `hydrateScreeningForm`
    restores the checkbox toggle (`checks[grid]`) from the identifier suffix,
