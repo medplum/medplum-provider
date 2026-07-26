@@ -70,6 +70,9 @@ const DENTAL_EXAM_CODE = 'Last dental exam';
 const VISION_EXAM_CODE = 'Last vision exam';
 const GLASSES_HISTORY_CODE = 'History of prescribed glasses/contacts';
 const ROS_COMMENTS_CODE = 'Review of systems: additional comments';
+const SIGNOFF_CODE = 'Admission health screening sign-off';
+const MANDATED_REPORTER_CODE = 'Mandated reporter statement read to youth';
+const MANDATED_REPORTER_ITEM = 'Statement read to youth';
 
 /**
  * Observation code → the plain FormState text field it fills, for the
@@ -146,14 +149,11 @@ function textOrDateTime(obs: Observation): string | undefined {
  * resources back into form values, so reopening a partially-completed
  * screening shows what was entered instead of blank fields.
  *
- * Only fields the wizard actually persists can be repopulated. Known gaps,
- * deliberately not mapped here (documented in TASKS.md task 17):
+ * Only fields the wizard actually persists can be repopulated. One known gap,
+ * deliberately not mapped here (documented in TASKS.md task 17 step 6):
  * - Medications — `dosage`+`frequency` are merged into one string on save;
  *   splitting them back into the table's two columns is lossy and needs a
  *   product decision, not just code (see TASKS.md).
- * - The sign-off Nurse/Physician signatures and mandated-reporter statement —
- *   formatted strings, not yet parsed back (disposition-notes/
- *   signoff-datetime/review-date from that same section ARE mapped, below).
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
   const scalars: HydratedScalars = {};
@@ -315,6 +315,39 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
         if (match[2] && match[2] !== '—') {
           texts['vision-provider'] = match[2];
         }
+      }
+      continue;
+    }
+
+    if (code === SIGNOFF_CODE) {
+      // Written as "Nurse: <n>; Physician: <p>"; same parse-the-formatted-
+      // string approach as VISION_EXAM_CODE above. '—' is the save side's
+      // own placeholder for "not filled in" (see saveDiagnosisDisposition),
+      // not a real signature.
+      const match = /^Nurse: (.*); Physician: (.*)$/.exec(obs.valueString ?? '');
+      if (match) {
+        if (match[1] && match[1] !== '—') {
+          texts['nurse-signature'] = match[1];
+        }
+        if (match[2] && match[2] !== '—') {
+          texts['physician-signature'] = match[2];
+        }
+      }
+      if (obs.note?.[0]?.text) {
+        texts['health-alerts'] = obs.note[0].text;
+      }
+      continue;
+    }
+
+    if (code === MANDATED_REPORTER_CODE) {
+      // Presence of this Observation at all means the checkbox was checked —
+      // saveDemographics only writes it via saveObservationSet when
+      // checkedItems('mandated-reporter').length > 0, so there's no separate
+      // "checked but no value" state to distinguish, unlike GLASSES_HISTORY_CODE.
+      checks['mandated-reporter'] = [MANDATED_REPORTER_ITEM];
+      const initialsMatch = /^RN initials: (.*)$/.exec(obs.note?.[0]?.text ?? '');
+      if (initialsMatch?.[1]) {
+        texts['mandated-reporter-initials'] = initialsMatch[1];
       }
       continue;
     }

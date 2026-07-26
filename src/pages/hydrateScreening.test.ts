@@ -208,6 +208,67 @@ describe('hydrateScreeningForm', () => {
     });
   });
 
+  describe('sign-off and mandated-reporter (task 17 steps 7-8)', () => {
+    test('parses the combined "Nurse: ...; Physician: ..." sign-off string, plus health-alerts note', () => {
+      const data = empty();
+      data.observations = [
+        obs('Admission health screening sign-off', 'Admission health screening sign-off', {
+          valueString: 'Nurse: J. Rivera, RN; Physician: Dr. Okafor',
+          note: [{ text: 'Watch for allergic reaction, penicillin listed' }],
+        }),
+      ];
+
+      const { texts } = hydrateScreeningForm(data, undefined);
+
+      expect(texts['nurse-signature']).toBe('J. Rivera, RN');
+      expect(texts['physician-signature']).toBe('Dr. Okafor');
+      expect(texts['health-alerts']).toBe('Watch for allergic reaction, penicillin listed');
+    });
+
+    test('does not treat the "—" placeholder as a real signature', () => {
+      const data = empty();
+      data.observations = [
+        obs('Admission health screening sign-off', 'Admission health screening sign-off', {
+          valueString: 'Nurse: J. Rivera, RN; Physician: —',
+        }),
+      ];
+
+      const { texts } = hydrateScreeningForm(data, undefined);
+
+      expect(texts['nurse-signature']).toBe('J. Rivera, RN');
+      expect(texts['physician-signature']).toBeUndefined();
+    });
+
+    test('restores the mandated-reporter checkbox and RN initials from the note', () => {
+      const data = empty();
+      data.observations = [
+        obs('Mandated reporter statement read to youth', 'Mandated reporter statement read to youth', {
+          valueString: 'Statement read',
+          note: [{ text: 'RN initials: JR' }],
+        }),
+      ];
+
+      const { checks, texts } = hydrateScreeningForm(data, undefined);
+
+      expect(checks['mandated-reporter']).toEqual(['Statement read to youth']);
+      expect(texts['mandated-reporter-initials']).toBe('JR');
+    });
+
+    test('restores the mandated-reporter checkbox with no initials text when none was typed', () => {
+      const data = empty();
+      data.observations = [
+        obs('Mandated reporter statement read to youth', 'Mandated reporter statement read to youth', {
+          valueString: 'Statement read',
+        }),
+      ];
+
+      const { checks, texts } = hydrateScreeningForm(data, undefined);
+
+      expect(checks['mandated-reporter']).toEqual(['Statement read to youth']);
+      expect(texts['mandated-reporter-initials']).toBeUndefined();
+    });
+  });
+
   test('maps vitals observations to their scalar fields', () => {
     const data = empty();
     data.observations = [

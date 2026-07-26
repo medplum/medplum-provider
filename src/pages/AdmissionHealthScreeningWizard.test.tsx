@@ -691,6 +691,49 @@ describe('AdmissionHealthScreeningWizard', () => {
         'Wears reading glasses'
       );
     });
+
+    // Task 17 steps 7-8: sign-off (Nurse/Physician/health-alerts) and the
+    // mandated-reporter statement + RN initials both save correctly already;
+    // neither was read back.
+    test('populates sign-off and mandated-reporter fields on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Alvarez' }] });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Admission health screening sign-off' }],
+        code: { text: 'Admission health screening sign-off' },
+        valueString: 'Nurse: J. Rivera, RN; Physician: Dr. Okafor',
+        note: [{ text: 'Watch for allergic reaction' }],
+      } as Resource);
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [{ system: SCREENING_ID_SYSTEM, value: 'Mandated reporter statement read to youth' }],
+        code: { text: 'Mandated reporter statement read to youth' },
+        valueString: 'Statement read',
+        note: [{ text: 'RN initials: JR' }],
+      } as Resource);
+
+      await renderWizardForPatient(medplum, patient.id);
+
+      // Section 1 (mandated-reporter) shows on mount.
+      await waitFor(() => expect(checkbox('Statement read to youth').checked).toBe(true));
+      expect(fieldInput('RN initials').value).toBe('JR');
+
+      // Section 4 (sign-off) needs navigating to.
+      const user = userEvent.setup();
+      await goToStep(user, 'Diagnosis & Disposition');
+      await waitFor(() => expect(fieldInput("Nurse's signature (typed name)").value).toBe('J. Rivera, RN'));
+      expect(fieldInput("Physician's signature (typed name)").value).toBe('Dr. Okafor');
+      expect(
+        fieldTextarea('Health status alerts (document allergies on chart cover & problem list too)').value
+      ).toBe('Watch for allergic reaction');
+    });
   });
 
   describe('free-text field persistence (task 18)', () => {
