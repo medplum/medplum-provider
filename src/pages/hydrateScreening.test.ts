@@ -209,5 +209,75 @@ describe('hydrateScreeningForm', () => {
     expect(result.texts).toEqual({});
     expect(result.chips).toEqual({});
     expect(result.checks).toEqual({});
+    expect(result.checkTexts).toEqual({});
+  });
+
+  describe('"Other:" free text (task 17 step 3)', () => {
+    // The save side writes valueString/code.text as checkTextMap(grid)[item]
+    // || item — the typed free text if there is one, else the item's own
+    // name unchanged. So a stored value that differs from the item name IS
+    // the free text; equal to it means none was typed. Covers all four grids
+    // that carry this convention through an Observation (appearance + the
+    // three ROS grids share one code path in hydrateScreening.ts) plus the
+    // two that carry it through a resource's own `code.text` instead
+    // (allergy, chronic-list).
+    test('recovers free text on a checklist Observation ("Other" on appearance)', () => {
+      const data = empty();
+      data.observations = [
+        obs('Appearance/mental status finding', 'Appearance/mental status finding::Other', {
+          valueString: 'Flat affect',
+        }),
+      ];
+
+      const { checks, checkTexts } = hydrateScreeningForm(data, undefined);
+
+      expect(checks['appearance']).toEqual(['Other']);
+      expect(checkTexts['appearance']).toEqual({ Other: 'Flat affect' });
+    });
+
+    test('does not record free text when the stored value equals the item name (nothing was typed)', () => {
+      const data = empty();
+      data.observations = [
+        obs('Appearance/mental status finding', 'Appearance/mental status finding::Alert', {
+          valueString: 'Alert',
+        }),
+      ];
+
+      const { checkTexts } = hydrateScreeningForm(data, undefined);
+
+      expect(checkTexts['appearance']).toBeUndefined();
+    });
+
+    test('recovers free text on an allergy ("Other" via AllergyIntolerance.code.text)', () => {
+      const data = empty();
+      data.allergies = [
+        {
+          resourceType: 'AllergyIntolerance',
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: 'allergy::Other' }],
+          code: { text: 'Bee stings' },
+        } as AllergyIntolerance,
+      ];
+
+      const { checks, checkTexts } = hydrateScreeningForm(data, undefined);
+
+      expect(checks['allergy']).toEqual(['Other']);
+      expect(checkTexts['allergy']).toEqual({ Other: 'Bee stings' });
+    });
+
+    test('recovers free text on a chronic condition ("Other" via Condition.code.text)', () => {
+      const data = empty();
+      data.conditions = [
+        {
+          resourceType: 'Condition',
+          identifier: [{ system: SCREENING_ID_SYSTEM, value: 'chronic::Other' }],
+          code: { text: 'Ehlers-Danlos syndrome' },
+        } as Condition,
+      ];
+
+      const { checks, checkTexts } = hydrateScreeningForm(data, undefined);
+
+      expect(checks['chronic-list']).toEqual(['Other']);
+      expect(checkTexts['chronic-list']).toEqual({ Other: 'Ehlers-Danlos syndrome' });
+    });
   });
 });

@@ -138,7 +138,7 @@ export function AdmissionHealthScreeningWizard({
       if (!active || !data) {
         return;
       }
-      const { scalars, texts, chips, checks } = hydrateScreeningForm(data, loaded);
+      const { scalars, texts, chips, checks, checkTexts } = hydrateScreeningForm(data, loaded);
 
       if (scalars.lastName !== undefined) setLastName(scalars.lastName);
       if (scalars.firstName !== undefined) setFirstName(scalars.firstName);
@@ -166,6 +166,11 @@ export function AdmissionHealthScreeningWizard({
       for (const [grid, items] of Object.entries(checks)) {
         for (const item of items) {
           form.toggleCheck(grid, item, true);
+        }
+      }
+      for (const [grid, itemTexts] of Object.entries(checkTexts)) {
+        for (const [item, text] of Object.entries(itemTexts)) {
+          form.setCheckText(grid, item, text);
         }
       }
     })();
@@ -628,7 +633,15 @@ export function AdmissionHealthScreeningWizard({
     const liveKeys = new Set<string>();
     for (const item of form.checkedItems('appearance')) {
       liveKeys.add(`${APPEARANCE_CODE}::${item}`);
-      await obs(subject, { code: { text: APPEARANCE_CODE }, valueString: item }, item);
+      // 'appearance' has an Other::text item like every other checklist here,
+      // but unlike them (see saveAllergiesChronic, the ROS systems loop) this
+      // one was never reading checkTextMap — the typed-in "Other" text was
+      // silently discarded on save. Same epipen/task-18/19 class of bug.
+      await obs(
+        subject,
+        { code: { text: APPEARANCE_CODE }, valueString: form.checkTextMap('appearance')[item] || item },
+        item
+      );
     }
     await retractStale('Observation', subject, (k) => k.startsWith(`${APPEARANCE_CODE}::`), liveKeys);
   }

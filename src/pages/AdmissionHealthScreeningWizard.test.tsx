@@ -171,6 +171,36 @@ function checkbox(labelText: string): HTMLInputElement {
   return input as HTMLInputElement;
 }
 
+/**
+ * Same as `checkbox`, but scoped to the `.djs-card` whose title matches —
+ * several cards on the same page have their own "Other:" item (allergy,
+ * chronic-list, appearance all sit on Current Health Status at once), so an
+ * unscoped lookup by label text alone is ambiguous.
+ */
+function checkboxInCard(cardTitle: string, labelText: string): HTMLInputElement {
+  const card = screen.getByText(cardTitle).closest('.djs-card');
+  if (!card) {
+    throw new Error(`Could not find .djs-card for title "${cardTitle}"`);
+  }
+  const label = Array.from(card.querySelectorAll('label.djs-check-chip')).find((l) =>
+    l.querySelector('span')?.textContent?.startsWith(labelText)
+  );
+  const input = label?.querySelector('input[type="checkbox"]');
+  if (!input) {
+    throw new Error(`Could not find checkbox for "${labelText}" within card "${cardTitle}"`);
+  }
+  return input as HTMLInputElement;
+}
+
+/** The free-text `<input>` that appears inline next to an "Other:"-style checkbox, once checked. */
+function inlineTextInput(checkboxEl: HTMLInputElement): HTMLInputElement {
+  const input = checkboxEl.closest('label.djs-check-chip')?.querySelector('input[type="text"]');
+  if (!input) {
+    throw new Error('Could not find the inline text input next to this checkbox');
+  }
+  return input as HTMLInputElement;
+}
+
 /** Clicks a section's save button and waits for the save to settle (button re-enabled). */
 async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName: RegExp): Promise<void> {
   const button = (): HTMLElement => screen.getByRole('button', { name: buttonName });
@@ -523,6 +553,37 @@ describe('AdmissionHealthScreeningWizard', () => {
         )
       );
     });
+
+    // Task 17 step 3: the checkbox toggle for "Other" already restored
+    // correctly before this change; what was missing was the typed-in text
+    // next to it, which lives in a separate FormState bucket (checkTextMap).
+    test('populates both the "Other" checkbox and its inline free text on reopen', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({
+        resourceType: 'Patient',
+        name: [{ family: 'Nguyen' }],
+      });
+      const subject = { reference: `Patient/${patient.id}` };
+      await medplum.createResource({
+        resourceType: 'Observation',
+        status: 'final',
+        subject,
+        identifier: [
+          { system: SCREENING_ID_SYSTEM, value: 'Appearance/mental status finding::Other' },
+        ],
+        code: { text: 'Appearance/mental status finding' },
+        valueString: 'Flat affect',
+      } as Resource);
+
+      const user = userEvent.setup();
+      await renderWizardForPatient(medplum, patient.id);
+
+      await goToStep(user, 'Current Health Status');
+      const otherCheckbox = checkboxInCard('Appearance & mental status', 'Other');
+      await waitFor(() => expect(otherCheckbox.checked).toBe(true));
+      expect(inlineTextInput(otherCheckbox).value).toBe('Flat affect');
+    });
   });
 
   describe('free-text field persistence (task 18)', () => {
@@ -604,6 +665,32 @@ describe('AdmissionHealthScreeningWizard', () => {
 
       const reviewDate = await byCode('Admission screening review date');
       expect((reviewDate as { valueDateTime?: string })?.valueDateTime).toBe('2026-08-15');
+    });
+  });
+
+  describe('free-text field persistence (task 21)', () => {
+    // Found while implementing task 17 step 3: saveMentalStatus wrote
+    // valueString: item instead of checkTextMap('appearance')[item] || item,
+    // so "Other:"'s typed-in text on the Appearance & Mental Status grid was
+    // silently discarded on save — the appearance grid was the only one of
+    // the seven Other::text grids missing this read (race, allergy,
+    // chronic-list, and the four ROS grids already had it).
+    test('the Appearance grid\'s "Other" free text is saved, not just the checkbox', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Current Health Status');
+      const otherCheckbox = checkboxInCard('Appearance & mental status', 'Other');
+      await user.click(otherCheckbox);
+      await user.type(inlineTextInput(otherCheckbox), 'Flat affect');
+      await saveSection(user, /save health status/i);
+
+      const [obs] = await medplum.searchResources('Observation', {
+        identifier: `${SCREENING_ID_SYSTEM}|Appearance/mental status finding::Other`,
+      });
+      expect((obs as { valueString?: string })?.valueString).toBe('Flat affect');
     });
   });
 });

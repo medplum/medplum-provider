@@ -40,6 +40,8 @@ export interface HydratedForm {
   chips: Record<string, string>;
   /** FormState checklists: grid → checked item values. */
   checks: Record<string, string[]>;
+  /** FormState "Other:"-style inline free text: grid → item → typed text. */
+  checkTexts: Record<string, Record<string, string>>;
 }
 
 /** Observation code → the scalar vital field it fills. */
@@ -122,16 +124,17 @@ function textOrDateTime(obs: Observation): string | undefined {
  *   formatted strings, not yet parsed back (disposition-notes/
  *   signoff-datetime/review-date from that same section ARE mapped, below).
  * - Hair/eye colour, race, interpreter, birthplace, and the ethnicity chip —
- *   additional demographics, not yet mapped.
+ *   additional demographics, not yet mapped. This includes `race`'s own
+ *   Other::text free text — it's a Patient extension (valueCodeableConcept),
+ *   not an Observation, and out of scope until race itself is mapped.
  * - The 6-cell vision-acuity grid — not yet mapped.
- * - `checkText` free-text on "Other::" items — not yet mapped; distinct from
- *   the checkbox toggle above, which already restores correctly.
  */
 export function hydrateScreeningForm(data: ScreeningResources, patient: Patient | undefined): HydratedForm {
   const scalars: HydratedScalars = {};
   const texts: Record<string, string> = {};
   const chips: Record<string, string> = {};
   const checks: Record<string, string[]> = {};
+  const checkTexts: Record<string, Record<string, string>> = {};
 
   // ---- Section 1: core Patient fields ----
   const name = patient?.name?.[0];
@@ -172,6 +175,16 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
       const item = itemFromKey(obs);
       if (item) {
         (checks[grid] ??= []).push(item);
+        // The save side writes valueString: checkTextMap(grid)[item] || item —
+        // i.e. the free text typed next to an "Other:"-style item when there
+        // is one, else the item's own name. So a stored value that differs
+        // from the item name IS that free text; a value equal to the item
+        // name means none was typed. This is how every Other::text grid
+        // round-trips (see AdmissionHealthScreeningWizard.tsx's
+        // saveAllergiesChronic / the ROS systems loop / saveMentalStatus).
+        if (obs.valueString && obs.valueString !== item) {
+          (checkTexts[grid] ??= {})[item] = obs.valueString;
+        }
       }
       continue;
     }
@@ -232,7 +245,15 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
   for (const allergy of data.allergies as AllergyIntolerance[]) {
     const key = screeningKey(allergy);
     if (key?.startsWith('allergy::')) {
-      allergyItems.push(key.slice('allergy::'.length));
+      const item = key.slice('allergy::'.length);
+      allergyItems.push(item);
+      // Same Other::text convention as the checklist Observations above,
+      // but here the free text lives in code.text (saveAllergiesChronic
+      // writes `code: { text: checkTextMap('allergy')[item] || item }`),
+      // not valueString.
+      if (allergy.code?.text && allergy.code.text !== item) {
+        (checkTexts['allergy'] ??= {})[item] = allergy.code.text;
+      }
     }
     const reaction = allergy.reaction?.[0]?.description;
     if (reaction && !texts['allergy-reaction']) {
@@ -248,7 +269,11 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
   for (const condition of data.conditions as Condition[]) {
     const key = screeningKey(condition);
     if (key?.startsWith('chronic::')) {
-      chronicItems.push(key.slice('chronic::'.length));
+      const item = key.slice('chronic::'.length);
+      chronicItems.push(item);
+      if (condition.code?.text && condition.code.text !== item) {
+        (checkTexts['chronic-list'] ??= {})[item] = condition.code.text;
+      }
     } else if (key?.startsWith('nursing-diagnosis::') && condition.code?.text) {
       texts[key.slice('nursing-diagnosis::'.length)] = condition.code.text;
     }
@@ -264,5 +289,5 @@ export function hydrateScreeningForm(data: ScreeningResources, patient: Patient 
     checks['nursing-plan'] = carePlan.description.split('; ').filter(Boolean);
   }
 
-  return { scalars, texts, chips, checks };
+  return { scalars, texts, chips, checks, checkTexts };
 }
