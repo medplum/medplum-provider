@@ -15,6 +15,10 @@ For architecture, invariants, bug classes, and platform findings, see
 gets a one-line mention with a commit hash; the reasoning behind it lives
 in git history and, where it's still relevant going forward, in `CLAUDE.md`.
 
+Open design and product decisions that block or shape tasks are tracked in
+`DECISIONS.md`. Tasks that say "needs a design decision" or "blocked on X"
+reference a numbered section there.
+
 ---
 
 ## Current state
@@ -93,14 +97,17 @@ upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
 (local to the wizard file) fixed disposition-notes; sweep the rest of
 `AdmissionHealthScreeningWizard.tsx` for identifier/search-token
 construction that bypasses it, and consider promoting it to a shared
-`screeningData.ts` export. **Blocked behind task 35** — if checklist
-identifiers stop deriving from item names, the hazard may disappear rather
-than need escaping; don't fix this twice.
+`screeningData.ts` export. **Blocked behind task 35, which is blocked
+behind DECISIONS.md §6 and §7** — if checklist identifiers stop deriving
+from item names, the hazard may disappear rather than need escaping; don't
+fix this twice.
 
 **Task 22 — map medication drug names to RxNorm.** Dose/frequency are
 already structured (`Dosage`); the drug name itself
 (`medicationCodeableConcept.text`) is still free text. Needs a
 drug-search/lookup UI this form doesn't have. Do before task 23.
+**Blocked on DECISIONS.md §4** — the search UX and terminology source
+need to be decided before implementation.
 
 **Task 23 — integrate prescribing/orders: `MedicationRequest` + DoseSpot.**
 Blocked on task 22. The wizard's medication section is reconciliation/history
@@ -125,12 +132,18 @@ Peer to the AccessPolicy backlog item for a minor-in-custody population.
 
 **Task 31 — `CarePlan.activity[]` instead of `join('; ')`.** Same
 merged-string/separator-fragility pattern as the comma bug. Some plan
-items are arguably `ServiceRequest`/`Task`, not plan text.
+items are arguably `ServiceRequest`/`Task`, not plan text. **Blocked on
+DECISIONS.md §3** — whether plan items are tracked clinical tasks or
+documentation of intent changes the right data model entirely.
 
 **Task 32 — sign-off as `performer` references**, not
 `"Nurse: X; Physician: Y"` regex-parsed back. Nurse/physician are typed
 strings with no link to real Practitioner accounts — a legally meaningful
-sign-off is currently unattributable.
+sign-off is currently unattributable. **Blocked on DECISIONS.md §2** —
+whether typed names are acceptable or linked accounts are required is a
+policy question, not a technical one. Also closely coupled to DECISIONS.md
+§1 (record locking): a sign-off is only meaningful as a lock trigger if the
+signer's identity is verified.
 
 **Task 33 — US Core demographics conformance.** `us-core-race`/
 `us-core-ethnicity` are complex extensions (`ombCategory` + `text`
@@ -144,15 +157,17 @@ Most of this project's bug backlog (identifier collisions, comma escaping,
 retraction scoping, "wired in JSX but never saved") is inherent to
 hand-rolling form persistence; `QuestionnaireResponse` round-trips
 losslessly by construction. Is the current architecture fighting the
-platform, and what would migrating cost?
+platform, and what would migrating cost? **Needs the stakeholder question
+in DECISIONS.md §7 answered first** — whether individual-resource
+queryability is required determines whether QR is even viable.
 
 **Task 35 — checklist code/value inversion + past history as Condition.**
 Largest open item; needs a design decision before decomposing. Across
 appearance/ROS/dental/infectious the *value* carries the finding and the
 *code* is a bucket, inverting FHIR convention — findings are unqueryable
-by code. May be substantially subsumed by task 34. **Sequencing: 34 → 35 →
-20** — don't fix task 20 before this settles, or the fix may be redone or
-become moot.
+by code. May be substantially subsumed by task 34. **Blocked on
+DECISIONS.md §6 and §7. Sequencing: 34 → 35 → 20** — don't fix task 20
+before this settles, or the fix may be redone or become moot.
 
 **Task 36 — thread the admission Encounter reference through every
 resource type. — DONE.** `ensureEncounterRef()` (mirrors `ensurePatientRef()`)
@@ -184,30 +199,31 @@ Both scripts now print what they found on failure instead of a blank
 error, so a retry should be self-diagnosing. Patient edit stays broken
 until this is picked back up.
 
-**Task 40 — surface the admission Encounter in the UI. — DONE.** Decision:
-a direct link from `PatientOverviewPage` to the admission Encounter's own
-chart page, rather than a hint on the "Visits" tab label. Reasoning: a
-passive hint still leaves someone hunting through a list of Encounters to
-find the right one, and the tab label is shared across every patient in
-the app, not just ones with a DJS screening — a direct link from where DJS
-staff already look (the Overview page) is both more direct and more
-targeted. `screening.encounters` (already resolved by
-`loadScreeningResources`) is matched via `screeningKey(e) ===
-ADMISSION_ENCOUNTER_KEY`, same lookup pattern the page already uses for
-conditions; the link only renders once that Encounter actually exists, and
-targets its own id — not a guessed path. Tested in
-`PatientOverviewPage.test.tsx`.
+**Task 40 — "New encounter" button on the Overview page. — DONE.** A
+`New encounter` button in `PatientOverviewPage` navigates to
+`/Patient/:patientId/Encounter/new`, which opens the existing
+`EncounterModal` already routed there — it pre-populates the patient field
+from the route param and navigates to the new encounter's chart page on
+creation. A standalone new encounter is a distinct clinical act from the
+admission screening wizard (which creates its own `Encounter` automatically
+when the first section saves). Tested in `PatientOverviewPage.test.tsx`.
 
-**Task 41 — "Start admission screening" / "New encounter" buttons on the
-patient page.** The prepopulate-from-`patientId` path is already proven
-(existing tests), so the screening button just needs to link to
-`/admission-screening/:patientId`. Settle whether a standalone "new
-encounter" is a distinct clinical act, or duplicates what saving the
-screening's first section already does, before building both paths.
+**Task 41 — "Start admission screening" button on the patient page.** The
+screening button just needs to link to `/admission-screening/:patientId`
+from the Overview page. The `New encounter` button (task 40) covers the
+standalone encounter case — this task is now only about the screening shortcut.
+Prepopulate-from-`patientId` is already proven by existing tests.
 
 **Task 44 — export tab: accept date-only input, default end date to now.**
 Establish whether the page is ours or stock `medplum-provider` before
 patching a vendored file.
+
+**Task 45 — record locking: make a completed screening read-only.**
+Once a screening is signed off (or a supervisor approves it), the record
+should become non-editable. **Blocked on DECISIONS.md §1** — the trigger,
+lock granularity, and who-can-unlock questions must be answered before any
+implementation. Also blocked on §2 (sign-off identity) — locking on a
+sign-off that can't be attributed to a real account is of limited value.
 
 ---
 
@@ -215,7 +231,9 @@ patching a vendored file.
 
 - **AccessPolicy.** Nothing restricts the sensitive sections beyond default
   patient-record visibility. Retraction preserves an audit trail; access
-  control is separate and unbuilt.
+  control is separate and unbuilt. **Blocked on DECISIONS.md §5** — the
+  role model and which sections are sensitive must be defined before
+  policies can be written.
 - **Coded terminology.** Itemized above rather than one vague line — see
   tasks 26 (done), 28, 30, 33, 22.
 - **Field validation.** No required-field or range checks anywhere.
