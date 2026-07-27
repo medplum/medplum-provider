@@ -83,8 +83,10 @@ rather than removed.)
 - **Idempotent saves** — re-saving updates in place instead of duplicating
 - **Withdrawal, not deletion** — unchecking an item marks its record
   `entered-in-error` and keeps the history
-- A read-only screening summary on the patient page, shown alongside Medplum's
-  own `PatientSummary` rather than replacing it
+- A full "Overview" tab/page on the patient record (`PatientOverviewPage.tsx`)
+  covering the same sections Medplum's default `PatientSummary` does, using
+  the same underlying resource queries, plus the DJS-specific ones (Pain,
+  Sign-off) it doesn't know about — with each concept shown exactly once
 
 ### Known rough edges
 
@@ -129,8 +131,10 @@ src/
     hydrateScreening.ts — pure function: stored resources → form values
     djsFacilities.ts    — canonical DJS facility list (codes are permanent)
     formState.ts        — chip/check/text/table state + the "A|B::text" item parser
+    patient/PatientOverviewPage.tsx — the "Overview" tab on the patient page;
+                          combines the DJS screening summary with the same
+                          sections Medplum's default PatientSummary shows
   components/
-    DjsPatientSummary.tsx — read-only screening summary on the patient page
     SidebarStepper · PatientBand · Card · ChipGroup · CheckGrid
     FormControls · Callout · DynamicTable · MarylandChrome
   theme/

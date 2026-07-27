@@ -64,6 +64,11 @@ export function getPatientPageTabs(
 
 export const PatientPageTabs: PatientPageTabInfo[] = [
   { id: 'timeline', url: '', label: 'Timeline' },
+  // Task 42: replaces the old sidebar-embedded DjsPatientSummary +
+  // PatientSummary pair (shown side by side, which duplicated Vitals /
+  // Allergies / Medications). A real tab, not a permanently-visible sidebar
+  // widget, so it can be a full page — see PatientOverviewPage.tsx.
+  { id: 'overview', url: 'overview', label: 'Overview' },
   { id: 'edit', url: 'edit', label: 'Edit' },
   {
     id: 'encounter',

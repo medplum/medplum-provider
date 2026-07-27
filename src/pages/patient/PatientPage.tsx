@@ -1,37 +1,22 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { Loader, Modal, Paper, ScrollArea } from '@mantine/core';
-import { getReferenceString, isOk } from '@medplum/core';
-import type { WithId } from '@medplum/core';
-import type { OperationOutcome, Patient } from '@medplum/fhirtypes';
-import {
-  createPharmaciesSection,
-  Document,
-  getDefaultSections,
-  LinkTabs,
-  OperationOutcomeAlert,
-  PatientSummary,
-  useMedplum,
-} from '@medplum/react';
+import { Loader, Paper, ScrollArea } from '@mantine/core';
+import { calculateAgeString, formatHumanName, getReferenceString, isOk } from '@medplum/core';
+import type { OperationOutcome } from '@medplum/fhirtypes';
+import { Document, LinkTabs, OperationOutcomeAlert, useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
-import { useCallback, useMemo, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router';
-import { usePharmacyDialog } from '../../components/pharmacy/usePharmacyDialog';
+import { useMemo, useState } from 'react';
+import { Outlet } from 'react-router';
 import { useDoseSpotAccess } from '../../hooks/useDoseSpotAccess';
 import { usePatient } from '../../hooks/usePatient';
-import { DjsPatientSummary } from '../../components/DjsPatientSummary';
-import { OrderLabsPage } from '../labs/OrderLabsPage';
 import classes from './PatientPage.module.css';
 import { getPatientPageTabs, patientPathPrefix } from './PatientPage.utils';
 
 export function PatientPage(): JSX.Element {
-  const navigate = useNavigate();
   const medplum = useMedplum();
   const membership = medplum.getProjectMembership();
   const [outcome, setOutcome] = useState<OperationOutcome>();
   const patient = usePatient({ setOutcome });
-  const [isLabsModalOpen, setIsLabsModalOpen] = useState(false);
-  const PharmacyDialogComponent = usePharmacyDialog();
   const { hasAccess: hasDoseSpotAccess } = useDoseSpotAccess();
   const tabs = getPatientPageTabs(membership, { hasDoseSpotAccess });
   const resolvedTabs = useMemo(
@@ -43,18 +28,6 @@ export function PatientPage(): JSX.Element {
     [patient?.id, tabs]
   );
 
-  const handleCloseLabsModal = useCallback(() => {
-    setIsLabsModalOpen(false);
-  }, []);
-
-  const sections = useMemo(
-    () =>
-      getDefaultSections(() => setIsLabsModalOpen(true)).map((s) =>
-        s.key === 'pharmacies' ? createPharmaciesSection(PharmacyDialogComponent) : s
-      ),
-    [setIsLabsModalOpen, PharmacyDialogComponent]
-  );
-
   if (outcome && !isOk(outcome)) {
     return (
       <Document>
@@ -63,58 +36,68 @@ export function PatientPage(): JSX.Element {
     );
   }
 
-  const patientId = patient?.id;
-  if (!patientId) {
+  // Guarding on `patient` itself (not just `patient?.id`) so TS narrows
+  // `patient` to defined below — the sidebar now reads `patient.name`/
+  // `patient.birthDate` directly rather than going through PatientSummary,
+  // which used to need its own `as WithId<Patient>` cast for this.
+  if (!patient?.id) {
     return (
       <Document>
         <Loader />
       </Document>
     );
   }
+  const patientId = patient.id;
 
   return (
-    <>
-      <div key={getReferenceString(patient)} className={classes.container}>
-        <div className={classes.sidebar}>
-          <ScrollArea className={classes.scrollArea}>
-            {/*
-              DJS admission-screening summary, rendered above Medplum's default
-              PatientSummary rather than replacing it — the default sections
-              (vitals, meds, allergies, problems, pharmacies, Order Labs) stay,
-              so this is additive, not a feature regression. patient.id is
-              guaranteed by the guard above, hence the WithId cast.
-            */}
-            <DjsPatientSummary patient={patient as WithId<Patient>} />
-            <PatientSummary
-              patient={patient}
-              onClickResource={(resource) =>
-                navigate(`/Patient/${patientId}/${resource.resourceType}/${resource.id}`)?.catch(console.error)
-              }
-              sections={sections}
+    <div key={getReferenceString(patient)} className={classes.container}>
+      <div className={classes.sidebar}>
+        <ScrollArea className={classes.scrollArea}>
+          {/*
+            Task 42: the old sidebar held BOTH DjsPatientSummary and Medplum's
+            default PatientSummary side by side — additive on purpose at the
+            time (task 16), but it meant Vitals/Allergies/Medications were
+            shown twice, and the "miscommunication" the user later flagged.
+            All of that content now lives in the "Overview" tab
+            (PatientOverviewPage.tsx), which owns the full page rather than a
+            narrow always-visible strip. The sidebar keeps only identity + a
+            direct link there, so it doesn't compete with the tab content.
+          */}
+          <div style={{ padding: '16px 12px' }}>
+            <p style={{ fontWeight: 600, marginBottom: 4 }}>{formatHumanName(patient.name?.[0])}</p>
+            {patient.birthDate && (
+              <p style={{ fontSize: 13, color: 'var(--mantine-color-gray-6)' }}>
+                {patient.birthDate} ({calculateAgeString(patient.birthDate)})
+              </p>
+            )}
+            {patient.gender && (
+              <p style={{ fontSize: 13, color: 'var(--mantine-color-gray-6)' }}>
+                {patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1)}
+              </p>
+            )}
+            <a href={`${patientPathPrefix(patientId)}/overview`} style={{ display: 'inline-block', marginTop: 12 }}>
+              View full overview →
+            </a>
+          </div>
+        </ScrollArea>
+      </div>
+
+      <div className={classes.content}>
+        <Paper w="100%" radius={0} style={{ borderBottom: '1px solid var(--app-shell-border-color)' }}>
+          <ScrollArea>
+            <LinkTabs
+              baseUrl={patientPathPrefix(patientId)}
+              tabs={resolvedTabs}
+              variant="unstyled"
+              className="pill-tabs"
+              p="sm"
             />
           </ScrollArea>
-        </div>
-
-        <div className={classes.content}>
-          <Paper w="100%" radius={0} style={{ borderBottom: '1px solid var(--app-shell-border-color)' }}>
-            <ScrollArea>
-              <LinkTabs
-                baseUrl={patientPathPrefix(patientId)}
-                tabs={resolvedTabs}
-                variant="unstyled"
-                className="pill-tabs"
-                p="sm"
-              />
-            </ScrollArea>
-          </Paper>
-          <div className={classes.contentBody}>
-            <Outlet />
-          </div>
+        </Paper>
+        <div className={classes.contentBody}>
+          <Outlet />
         </div>
       </div>
-      <Modal opened={isLabsModalOpen} onClose={handleCloseLabsModal} size="xl" centered title="Order Labs">
-        <OrderLabsPage onSubmitLabOrder={handleCloseLabsModal} />
-      </Modal>
-    </>
+    </div>
   );
 }

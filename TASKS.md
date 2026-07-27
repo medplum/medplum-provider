@@ -744,23 +744,72 @@ The order matters, and it isn't the numeric one.
 - **40 and 41 last**, adding content and actions into a settled structure.
   They're small once 42 has landed, and may be mostly links.
 
-### The decision 42 needs first
+### The decision 42 needs first — resolved by the user 2026-07-28
 
 Task 42 **reverses task 16's deliberate choice** to keep `DjsPatientSummary`
-additive alongside Medplum's `PatientSummary`. That was chosen so we
-weren't hiding data the platform surfaces. The user has now used it and
-wants them merged; both positions are reasonable, so decide explicitly and
-write down why.
+additive alongside Medplum's `PatientSummary`, shown side by side in the
+sidebar. The user called task 16's approach "a miscommunication": what was
+actually wanted all along was **a real page** — full content, own layout —
+not two components stacked in a narrow strip. Decision: **build it as a
+new page** (option (a) from below, in page form rather than panel form),
+using the base package's underlying *functionality* (the same resource
+queries/actions) but not its component *implementation*, since
+design/product will redesign this page's look regardless.
 
-- **(a) One merged panel** — most work, best result.
-- **(b) DJS replaces the default** — cheapest, and **the risky one**: the
-  original reason for additive was not knowing what we'd be hiding.
-  Question 3 above must be answered before this is on the table.
-- **(c) Keep both, deduplicate the overlap** — smallest change that
-  addresses the actual complaint (seeing the same thing twice).
+- ~~(a) One merged panel~~ — done, as a **page**, not a panel.
+- (b) DJS replaces the default — not chosen; would have silently dropped
+  Demographics/Smoking Status/Sexual Orientation/Insurance/Pharmacies/Labs.
+- (c) Keep both, deduplicate — superseded; the page approach subsumes it.
 
-Recommendation: answer question 3, then choose between (a) and (c). Treat
-(b) as available only if the audit shows the default panel adds nothing.
+**Task 42 — DONE.** New route/tab: `PatientOverviewPage.tsx`
+(`src/pages/patient/`), added to `PatientPageTabs` as `overview` ("Overview"),
+routed in `App.tsx` under `/Patient/:patientId/overview`.
+
+**Every new section's query was verified against `@medplum/react`'s own
+bundled source, not guessed** — grep'd the actual `searches` arrays inside
+the compiled `index.cjs` (the `.d.ts` only gives types, not the queries):
+
+| Section | Resource / query, verified from Medplum's own section configs |
+|---|---|
+| Demographics | No query — reads `patient` prop directly (birthDate, gender, communication, address) |
+| Smoking Status | `Observation`, `subject`, LOINC `72166-2` |
+| Sexual Orientation | `Observation`, `subject`, LOINC `76690-7` |
+| Insurance | `Coverage`, `beneficiary` — filtered to `active` and non-`SELFPAY`, same as Medplum's `Insurance` component |
+| Pharmacies | `getPreferredPharmaciesFromPatient(patient)` — a real `@medplum/core` export, reused directly (not re-derived); its extension shape (`patient-preferredPharmacy`, `pharmacy-preference-type` codes `primary`/`preferred`) was grep'd from the same bundle since the constants are minified and not worth guessing |
+| Labs | `ServiceRequest` + `DiagnosticReport`, both `subject`; "Order Labs" reuses the existing `OrderLabsPage` component in a local `Modal`, not reimplemented |
+
+**Deduplicated, not doubled:** Vitals, Allergies, Medications, and the
+Condition-based sections (Chronic conditions / Nursing diagnoses, which
+together cover what Medplum's generic "Problem List" would show) appear
+**exactly once**, using the DJS versions — they already understand this
+form's specific shapes (the BP component panel, structured `Dosage`) that a
+generic list doesn't. Pain and Sign-off are DJS-only and have no Medplum
+equivalent. A test (`shows each duplicated concept exactly once`) asserts
+this directly — one "Allergies" heading, one "Medications" heading — not
+just that the data is present.
+
+**Six sections will show "Not recorded" for every current patient**
+(Smoking Status, Sexual Orientation, Insurance, Pharmacies, most of Labs,
+and Demographics' Address) — nothing in this app writes those resource
+types yet. **That's accurate, not a bug**: it's the honest reflection of
+what the platform *could* show once this data starts existing, which was
+the whole point of not silently dropping it.
+
+**`DjsPatientSummary.tsx` and its test are deleted, not left as dead code.**
+Its logic was ported (not imported/reused) into the new page, since the old
+file was being retired in the same change — importing from a file about to
+be deleted would have been a pointless indirection. The old test's
+assertions were ported 1:1 (`renders live vitals, allergies and medications
+(ported from DjsPatientSummary)`) so the migration is provably lossless.
+
+**`PatientPage.tsx`'s sidebar is now slim** — patient name, birthdate+age,
+gender, and a link to Overview — rather than the two full summary panels.
+One pre-existing test (`renders homer summary information in sidebar`)
+asserted `<PatientSummary>` was called; since that's deliberately no longer
+rendered there, the test was updated to check the same *intent* (patient
+identity visible in the sidebar) against the new slim markup rather than
+the now-gone component. Verified this is the only test-side casualty by
+running the full parent-package suite, not assumed.
 
 ### One cross-cutting risk
 

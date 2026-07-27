@@ -44,6 +44,7 @@ import { CoveragePage } from './pages/patient/CoveragePage';
 import { DocumentsPage } from './pages/patient/DocumentsPage';
 import { DoseSpotTab } from './pages/patient/DoseSpotTab';
 import { EditTab } from './pages/patient/EditTab';
+import { PatientOverviewPage } from './pages/patient/PatientOverviewPage';
 import { ExportTab } from './pages/patient/ExportTab';
 import { IntakeFormPage } from './pages/patient/IntakeFormPage';
 import { LabsPage } from './pages/patient/LabsPage';
@@ -210,6 +211,7 @@ export function App(): JSX.Element | null {
                 <Route path="Encounter/:encounterId" element={<EncounterChartPage />}>
                   <Route path="Task/:taskId" element={<TaskDetailsModal />} />
                 </Route>
+                <Route path="overview" element={<PatientOverviewPage />} />
                 <Route path="edit" element={<EditTab />} />
                 <Route path="Communication" element={<CommunicationTab />} />
                 <Route path="Communication/:messageId" element={<CommunicationTab />} />

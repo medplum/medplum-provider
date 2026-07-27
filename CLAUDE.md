@@ -82,7 +82,7 @@ don't extrapolate from a green unit run.
 - `src/pages/screeningData.ts` — `loadScreeningResources(medplum,
   patientId)`: the one place that reads a patient's screening resources
   back. Filters out retracted findings and collapses legacy duplicates.
-  Both `hydrateScreening.ts` (form read-back) and `DjsPatientSummary.tsx`
+  Both `hydrateScreening.ts` (form read-back) and `PatientOverviewPage.tsx`
   (display) build on this — extend it, don't duplicate its search/filter
   logic elsewhere. Also home to `buildDosage()`/`dosageToFields()`
   (task 17 step 6): the medications table's dose/frequency save into FHIR
@@ -105,9 +105,22 @@ don't extrapolate from a green unit run.
   pure function, live resources → form values, for resuming a
   partially-completed screening. Kept pure and separately unit-tested
   (see "Bug classes" below for why).
-- `src/components/DjsPatientSummary.tsx` — read-only screening summary
-  shown on the patient page, **alongside** Medplum's own `PatientSummary`
-  (additive, not a replacement — the default sections are untouched).
+- `src/pages/patient/PatientOverviewPage.tsx` — the "Overview" tab on the
+  patient page (task 42). Replaces what used to be `DjsPatientSummary.tsx`
+  shown additively alongside Medplum's own `PatientSummary` in the sidebar
+  (task 16) — that produced real duplication (Vitals/Allergies/Medications
+  shown twice), which the user later called "a miscommunication." Now a
+  real page, not a sidebar widget: every section Medplum's `PatientSummary`
+  has is present, using the **same verified resource query** each of
+  Medplum's own section configs uses (grep'd from `@medplum/react`'s
+  bundled source, not guessed — see TASKS.md task 42 for the full table),
+  but not its component implementation, since design/product will redesign
+  this page's look regardless. Sections DJS already covered (Vitals,
+  Allergies, Medications, Conditions) appear **once**, using the DJS
+  version — it already understands this form's specific shapes (the BP
+  component panel, structured `Dosage`). `PatientPage.tsx`'s sidebar is now
+  a slim identity card (name, DOB+age, gender) linking here, not a second
+  copy of the data.
 - `src/components/FormControls.tsx` — `Grid` (checkbox list bound to
   FormState), `YesNoChip`/`TrackedChip` (chip toggle + optional reveal).
 - `src/theme/tokens.css` — design tokens and every `.djs-*` class. Real

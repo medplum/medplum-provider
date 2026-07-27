@@ -4,7 +4,6 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { calculateAgeString } from '@medplum/core';
 import { HomerSimpson, MockClient } from '@medplum/mock';
-import * as medplumReact from '@medplum/react';
 import { MedplumProvider } from '@medplum/react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -123,8 +122,13 @@ describe('PatientPage', () => {
     });
   });
 
-  test('renders homer summary information in sidebar', async () => {
-    const patientSummarySpy = vi.spyOn(medplumReact, 'PatientSummary');
+  // Task 42: the sidebar no longer renders Medplum's <PatientSummary> (that
+  // moved into the "Overview" tab, PatientOverviewPage.tsx, to stop showing
+  // Vitals/Allergies/Medications twice). It kept the one thing this test was
+  // actually checking for — patient identity at a glance — just via its own
+  // slim markup instead of PatientSummary's Demographics section, so the
+  // spy-on-PatientSummary approach no longer applies.
+  test('renders homer identity information in sidebar', async () => {
     setup(`/Patient/${HomerSimpson.id}`);
 
     if (!HomerSimpson.birthDate) {
@@ -133,9 +137,6 @@ describe('PatientPage', () => {
 
     const age = calculateAgeString(HomerSimpson.birthDate);
 
-    await waitFor(() => {
-      expect(patientSummarySpy).toHaveBeenCalled();
-    });
     expect(await screen.findByText('Male')).toBeInTheDocument();
     expect(await screen.findByText(`1956-05-12 (${age})`)).toBeInTheDocument();
   });

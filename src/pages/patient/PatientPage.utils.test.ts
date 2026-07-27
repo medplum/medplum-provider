@@ -177,6 +177,9 @@ describe('PatientPage.utils', () => {
     test('contains expected tabs', () => {
       const tabIds = PatientPageTabs.map((tab) => tab.id);
       expect(tabIds).toContain('timeline');
+      // Task 42: replaces the old sidebar-embedded DjsPatientSummary +
+      // PatientSummary pair with a real tab/page (PatientOverviewPage.tsx).
+      expect(tabIds).toContain('overview');
       expect(tabIds).toContain('edit');
       expect(tabIds).toContain('encounter');
       expect(tabIds).toContain('tasks');
