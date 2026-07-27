@@ -61,6 +61,16 @@ export default defineConfig({
         test: {
           name: 'unit',
           exclude: [...configDefaults.exclude, '**/*.live.test.*'],
+          // Vitest's 5s default is tight for the DJS wizard's heavier
+          // multi-step UI tests (several userEvent interactions + saves per
+          // test) once real CPU contention is added — either many parallel
+          // test workers, or a slower machine. Confirmed via the full
+          // 1372-test parent-package run: a DJS test timed out there but
+          // passed clean, alone, in the same environment — contention, not
+          // a real failure. Raised project-wide rather than patched per
+          // test, since which specific test trips the ceiling depends on
+          // machine speed and scheduling, not the test itself.
+          testTimeout: 20_000,
         },
       },
       {

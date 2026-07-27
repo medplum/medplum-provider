@@ -428,6 +428,16 @@ Then: `npm run build` (type-checks tests too), `npm test`, and — for
 anything touching the write path — `npm run test:live` if you have a
 server available.
 
+**A DJS test occasionally timing out only when the *entire* parent-package
+suite runs is CPU contention, not a bug** — the `unit` project's
+`testTimeout` is 20s (`vite.config.ts`) specifically because the wizard's
+heavier multi-step UI tests can brush against Vitest's 5s default once
+real contention is added (many parallel workers, or a slow machine), even
+though they're correct. Confirmed, not assumed: a failing test timed out
+in the full 1372-test run and passed clean, alone, in the same
+environment. Verify by running the DJS files alone before assuming a
+regression.
+
 ## Formatting
 
 **`.gitattributes` handles line endings — don't convert files by hand.**
