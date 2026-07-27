@@ -91,7 +91,11 @@ don't extrapolate from a green unit run.
   and read-back share one definition of the mapping instead of each
   re-deriving it. The drug name itself is still uncoded free text —
   RxNorm mapping is tracked separately as task 22, since it needs a
-  drug-search/terminology source this form doesn't have.
+  drug-search/terminology source this form doesn't have. Blood pressure is
+  FHIR's standard two-component panel (LOINC 8480-6/8462-4, UCUM `mm[Hg]`),
+  not a `"120/80"` string — `code.text` stays `'Blood pressure'` since
+  identifiers derive from it, and a legacy-string parser stays in place to
+  read readings saved before the panel format existed.
 - `src/pages/djsFacilities.ts` — the 13 canonical DJS facilities. **A
   facility's `code` is permanent identity; its `name` is a mutable display
   label.** `Location` resources are upserted on the code and `Encounter`s
@@ -100,7 +104,12 @@ don't extrapolate from a green unit run.
   stored data. The facility field is a **closed-set dropdown with no
   free-text escape** — a typed fallback would reintroduce the
   duplicate-Location problem the code list exists to prevent. Add
-  facilities here; never let one be minted ad hoc mid-admission.
+  facilities here; never let one be minted ad hoc mid-admission. The
+  admission `Encounter` itself (`saveAdmissionEncounter()` in the wizard)
+  uses v3 ActCode `IMP` for `Encounter.class` — a deliberate approximation
+  (a custodial admission is a residential stay, not an ambulatory visit,
+  and ActCode has no juvenile-detention code), not a confident mapping;
+  revisit if DJS adopts a more specific value set.
 - `src/pages/hydrateScreening.ts` — `hydrateScreeningForm(data, patient)`:
   pure function, live resources → form values, for resuming a
   partially-completed screening. Kept pure and separately unit-tested
@@ -120,7 +129,24 @@ don't extrapolate from a green unit run.
   version — it already understands this form's specific shapes (the BP
   component panel, structured `Dosage`). `PatientPage.tsx`'s sidebar is now
   a slim identity card (name, DOB+age, gender) linking here, not a second
-  copy of the data.
+  copy of the data. **`PatientPage.tsx` is vendored `medplum-provider` code
+  already modified once** — prefer changes that live in our own components
+  over further edits to it, and note it explicitly when one is unavoidable.
+
+  The new sections' queries, verified against Medplum's own section
+  configs rather than guessed:
+
+  | Section | Query |
+  |---|---|
+  | Demographics | none — reads `patient` directly |
+  | Smoking Status | `Observation`, `subject`, LOINC `72166-2` |
+  | Sexual Orientation | `Observation`, `subject`, LOINC `76690-7` |
+  | Insurance | `Coverage`, `beneficiary`, filtered to `active` + non-`SELFPAY` |
+  | Pharmacies | `getPreferredPharmaciesFromPatient()` (`@medplum/core`) |
+  | Labs | `ServiceRequest` + `DiagnosticReport`, both `subject`; "Order Labs" reuses `OrderLabsPage` in a local `Modal` |
+
+  These will show "Not recorded" for every current patient — nothing in
+  this app writes those resource types yet. That's accurate, not a bug.
 - `src/components/FormControls.tsx` — `Grid` (checkbox list bound to
   FormState), `YesNoChip`/`TrackedChip` (chip toggle + optional reveal).
 - `src/theme/tokens.css` — design tokens and every `.djs-*` class. Real

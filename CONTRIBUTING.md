@@ -177,7 +177,7 @@ for "remove", it means *withdraw*, and a developer should wire it.
 npm test
 ```
 
-Runs the offline test suite (~103 tests for this wizard). **Run it before you
+Runs the offline test suite (100+ tests for this wizard). **Run it before you
 consider a change finished.** It's fast and needs nothing set up.
 
 ```bash

@@ -52,9 +52,9 @@ The wizard lives at `/admission-screening[/:patientId[/:encounterId]]`, plus an
 project to sign into — `.env` ships as the stock template with an empty client
 ID, so point `MEDPLUM_BASE_URL` at your project or a local server on `:8103`.
 
-`preview.html` is a static, dependency-free mirror of the wizard for a quick
-visual look with no build step. It's hand-maintained, so treat it as a sketch
-rather than the truth.
+`preview.html` is a stale, hand-maintained static mirror of the wizard —
+**don't trust it or spend effort updating it**; it's being replaced by a
+`MockClient`-backed demo route (task 38 in `TASKS.md`).
 
 ---
 
@@ -157,7 +157,7 @@ Two things that surprise people:
 ## Testing, and what's actually proven
 
 ```bash
-npm test             # offline suite (MockClient) — 103 DJS tests
+npm test             # offline suite (MockClient) — 113 DJS tests
 npm run test:live    # against a real Medplum server
 ```
 
@@ -206,12 +206,13 @@ instance hid.
 
 ## What's next
 
-`TASKS.md` is authoritative. In short: a FHIR-modeling audit produced tasks
-24–37, of which the data-loss and blood-pressure/vitals items are done. Open
-work is mostly coded terminology (allergy categories, RxNorm, Condition
-categories), practitioner attribution on every resource, and two larger
-questions — whether to adopt `QuestionnaireResponse` as the persistence model,
-and a checklist remodel that would change how identifiers are derived.
+`TASKS.md` is authoritative. In short: the data-loss, blood-pressure, vitals,
+and patient-overview-page items are done. Open work is mostly coded
+terminology (allergy categories, RxNorm, Condition categories), practitioner
+attribution on every resource, threading the admission Encounter through the
+rest of the resources it should link to, and two larger questions — whether
+to adopt `QuestionnaireResponse` as the persistence model, and a checklist
+remodel that would change how identifiers are derived.
 
 ---
 

@@ -261,6 +261,13 @@ need the same treatment the first time each is actually exercised).
 client-side per session, so a page left open from before the profile
 existed won't notice it's there now.
 
+**Status: this failed against one Docker-hosted server** — the download/
+extract/auth steps worked, but the server rejected the first
+StructureDefinition create as not actually being one, and the cause wasn't
+diagnosed (needs eyes on the filesystem this session didn't have). Both
+scripts now print what they actually found on failure, so a retry should
+be self-diagnosing rather than another blank error. See `TASKS.md` task 39.
+
 ---
 
 ## 8. Housekeeping this doc assumes you already know
