@@ -199,6 +199,28 @@ are ever reattempted, budget for this — a bundle write may need a delay or
 a different confirmation strategy before anything downstream searches for
 what it just wrote.
 
+**A fresh Medplum Project has no US Core StructureDefinitions loaded, and
+nothing loads them for you.** Confirmed 2026-07-26 via Medplum's own docs
+(fhir-datastore/profiles): "the corresponding StructureDefinition resource
+for the profile must be present in your Project — you need to upload the
+resource JSON for any profiles you plan to use." Base FHIR ships with the
+server; US Core (a separate IG) does not. Concretely: `Patient/:id/edit`
+calls `medplum.requestProfileSchema('.../us-core-patient', { expandProfile:
+true })`, which searches the Project for that StructureDefinition by
+canonical `url` and fails outright if it isn't there — not a validation
+failure, a **lookup** failure, and the resulting error ("Could not find the
+US Core Patient Profile") looks like an application bug but is a one-time
+Project setup gap. Fix and script: `scripts/load-us-core-profiles.sh`, doc:
+`RUNNING-LIVE-TESTS.md` §7 (task 39).
+
+**This directly corroborates the "acceptance is not profile validation"
+finding above, from the other direction.** A Project with *no* US Core
+StructureDefinitions loaded cannot possibly be validating writes against
+US Core profiles — there's nothing to validate against. Reinforces: profile
+conformance (tasks 26, 33) is entirely our responsibility to get right and
+test for; the platform will neither catch nor advertise a violation on its
+own.
+
 **The server accepts component panels and coded vitals — but acceptance is
 not profile validation.** Confirmed live 2026-07-26 (all 9 live tests, run
 twice): Medplum stores an Observation whose value lives entirely in

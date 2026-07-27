@@ -582,22 +582,49 @@ StructureDefinition. That's Medplum's own page and a server/config
 problem; it shares nothing with 40–42 but the word "patient". Bundling it
 would let a config investigation block UI work, or vice versa.
 
-Do it **first and separately**, and start by identifying which of three it
-is, because the fix differs completely:
+**Root cause confirmed 2026-07-26 — it's (1), a Project seed gap, not a
+Medplum defect and not our page.** Verified against Medplum's own docs
+(fhir-datastore/profiles), not guessed: a fresh Project ships base FHIR
+only; US Core StructureDefinitions must be uploaded to the Project before
+anything can reference them. Every environment built via
+`RUNNING-LIVE-TESTS.md` §1 (self-register → brand-new Project) hits this
+the first time `Patient/:id/edit` is opened, because nothing in that flow
+loads US Core.
 
-1. **Project seed gap** — US Core profiles were never loaded. Fix: load
-   them; add the step to `RUNNING-LIVE-TESTS.md` so the next person's
-   server isn't broken the same way.
-2. **Our setup instructions are incomplete** — same fix, different blame.
-3. **A Medplum defect** — the page requires a profile it doesn't ensure
-   exists. Fix: report upstream, decide whether to work around.
+**Fix delivered:** `scripts/load-us-core-profiles.{sh,ps1,cmd}` — three
+equivalent scripts (Git Bash / native PowerShell / cmd wrapper around the
+PowerShell one, since cmd has no reliable JSON/HTTPS handling of its own).
+Idempotent, uses the same `MEDPLUM_LIVE_CLIENT_ID`/`SECRET` convention as
+`test:live`, downloads the official HL7 US Core package from the FHIR
+package registry (not a hand-copied JSON blob) and loads only the three
+StructureDefinitions this codebase actually references for Patient
+(`us-core-patient`, `us-core-race`, `us-core-ethnicity`). Documented as a
+required one-time step in `RUNNING-LIVE-TESTS.md` §7.
 
-**Do not "fix" this by editing the vendored page.** If it's (1) or (2) the
-page is fine and the environment is wrong.
+**Confirmed no editing of the vendored page was needed** —
+`EditTab.tsx`/`ResourceFormWithRequiredProfile.tsx` already do the right
+thing (request the profile, show a clear error if missing); the Project
+just needed the profile loaded once.
 
-Whatever the outcome, record the platform finding: a server with no US
-Core profiles **cannot** be validating against them, which is the direct
-confirmation of the "acceptance is not validation" note in `CLAUDE.md`.
+**Deliberately scoped to Patient, not the whole package.** The codebase
+references several other US Core profiles too (AllergyIntolerance,
+CareTeam, Coverage, Immunization, MedicationRequest, Device, Condition,
+ObservationSexualOrientation, ObservationSmokingStatus). Each will hit this
+exact same "not found" error the first time that resource type's edit page
+is actually used — noted in the script headers and in
+`RUNNING-LIVE-TESTS.md` so it's recognized as the same root cause rather
+than re-diagnosed.
+
+**Recorded as a platform finding in `CLAUDE.md`:** a Project with zero US
+Core StructureDefinitions loaded cannot possibly be validating writes
+against US Core profiles — direct confirmation, from the other direction,
+of the "acceptance is not validation" note already there. Profile
+conformance (tasks 26, 33) stays entirely our responsibility.
+
+**Still needed to close this out:** running one of the scripts against a
+live Project and confirming `Patient/:id/edit` actually works afterward —
+that needs a live server, so it's the hand-run verification step, same
+pattern as the live test suite.
 
 ### Before touching 40–42: a short discovery spike
 

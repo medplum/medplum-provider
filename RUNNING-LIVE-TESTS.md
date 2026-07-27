@@ -203,7 +203,67 @@ its place, not the spy-and-throw machinery.
 
 ---
 
-## 7. Housekeeping this doc assumes you already know
+## 7. One-time setup: load US Core profiles (task 39)
+
+**Patient edit (`/Patient/:id/edit`) will fail on a fresh Project** with:
+
+```
+Not found
+Could not find the US Core Patient Profile
+Server error: StructureDefinition profile with URL
+http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient not found
+```
+
+This isn't a bug in this codebase's pages. A fresh Project (exactly what
+§1 above creates) ships with base FHIR only — US Core is a separate
+Implementation Guide, and per Medplum's own docs the StructureDefinition
+for a profile "must be present in your Project"; nothing loads it for you.
+Confirmed, not guessed — see `CLAUDE.md` → "Platform findings" for the
+citation.
+
+Fix, once per Project. Three equivalent scripts — pick whichever matches
+your shell, they all do the same thing:
+
+```sh
+# Git Bash
+export MEDPLUM_LIVE_CLIENT_ID=...
+export MEDPLUM_LIVE_CLIENT_SECRET=...
+./scripts/load-us-core-profiles.sh
+```
+
+```powershell
+# PowerShell (native — Windows' built-in tar handles the extraction, nothing extra to install)
+$env:MEDPLUM_LIVE_CLIENT_ID = "..."
+$env:MEDPLUM_LIVE_CLIENT_SECRET = "..."
+.\scripts\load-us-core-profiles.ps1
+```
+
+```bat
+:: cmd.exe — a thin wrapper that calls the PowerShell version above.
+:: There's no separate cmd-native implementation: cmd has no reliable
+:: built-in JSON/HTTPS handling, so a "real" cmd version would be fragile
+:: or falsely reassuring. This just shells out to PowerShell, which every
+:: Windows box here already has.
+set MEDPLUM_LIVE_CLIENT_ID=...
+set MEDPLUM_LIVE_CLIENT_SECRET=...
+scripts\load-us-core-profiles.cmd
+```
+
+Same two env vars as above. Idempotent — safe to re-run. Loads only the
+three profiles this codebase actually references for `Patient`
+(`us-core-patient`, `us-core-race`, `us-core-ethnicity`), not the whole
+~150-profile package — see the script's own header comment for why, and
+for what to do if a *different* resource's edit page hits this same error
+later (the codebase references several other US Core profiles that will
+need the same treatment the first time each is actually exercised).
+
+**Reload the browser tab afterward** — the profile lookup is cached
+client-side per session, so a page left open from before the profile
+existed won't notice it's there now.
+
+---
+
+## 8. Housekeeping this doc assumes you already know
 
 - **Don't hand-convert line endings.** `.gitattributes` handles CRLF —
   see `CLAUDE.md` → "Formatting". A whole file showing as changed when
