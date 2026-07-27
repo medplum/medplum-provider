@@ -53,6 +53,9 @@ upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
 - **43** — section Save buttons advance to the next step on a successful
   save only (never on failure — see `CLAUDE.md` bug classes for why that
   matters).
+- **36** — every resource type (not just Observation) now links to the
+  admission Encounter, or to an explicit `:encounterId` route param when
+  embedded (see `CLAUDE.md`).
 
 ---
 
@@ -124,15 +127,15 @@ by code. May be substantially subsumed by task 34. **Sequencing: 34 → 35 →
 become moot.
 
 **Task 36 — thread the admission Encounter reference through every
-resource type.** `obs()` only sets `Observation.encounter` from the route
-param; Condition/AllergyIntolerance/MedicationStatement(`.context`)/CarePlan
-support the link and use it nowhere. **Next up** — confirmed in real use
-(a CarePlan's encounter field showing empty). **Hazard:** thread the
-reference explicitly like `subject`; never read it from React state inside
-a handler, or it reproduces the stale-closure bug in `CLAUDE.md` (`subject:
-undefined` on first save). `ensureEncounterRef()` mirroring
-`ensurePatientRef()` is the right shape; changes `obs()`'s signature and
-every call site.
+resource type. — DONE.** `ensureEncounterRef()` (mirrors `ensurePatientRef()`)
+resolves either the route-param `encounterId` (embedded case, unchanged) or
+the wizard's own admission Encounter, and every save handler now threads it
+explicitly through `obs()`/`saveObservationSet()` and into every
+Observation/Condition/AllergyIntolerance/CarePlan (`encounter`) and
+MedicationStatement (`context` — different field name, verified against
+`@medplum/fhirtypes` rather than assumed). See `CLAUDE.md` for the
+mutation-tested finding on what actually prevents duplicate Encounters
+(the conditional upsert, not the state cache).
 
 **Task 37 — model the Allegany County Youth Centers grouping via
 `Location.partOf`.** Purely additive. The last four facilities in

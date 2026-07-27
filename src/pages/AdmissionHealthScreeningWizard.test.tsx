@@ -624,6 +624,196 @@ describe('AdmissionHealthScreeningWizard', () => {
     });
   });
 
+  describe('encounter linkage across resource types (task 36)', () => {
+    // Before this task, obs() linked Observations to an Encounter only when
+    // the wizard was launched with an explicit :encounterId route param, and
+    // Condition/AllergyIntolerance/MedicationStatement/CarePlan never linked
+    // to any Encounter at all — confirmed in real use as a CarePlan showing
+    // an empty encounter field. This drives all four sections (mirroring the
+    // "every resource written... is valid FHIR" test) and asserts every
+    // resource type that supports an encounter link actually carries one,
+    // and that they all point at the SAME admission Encounter.
+    test('every resource type links to the same admission Encounter', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      // Section 1 — creates the admission Encounter.
+      await user.type(fieldInput('Last name'), 'Doe');
+      await saveSection(user, /save and next/i);
+
+      // Section 2 — Observation, AllergyIntolerance, Condition, MedicationStatement.
+      await goToStep(user, 'Current Health Status');
+      await user.type(fieldInput('Temp (°F)'), '98.6');
+      await user.click(checkbox('Latex allergy'));
+      await user.click(screen.getByRole('button', { name: /has one or more/i }));
+      await user.click(checkbox('Asthma'));
+      const addMedication = screen.getByRole('button', { name: /add medication/i });
+      await user.click(addMedication);
+      const medName = addMedication.previousElementSibling?.querySelector(
+        'tbody tr td input'
+      ) as HTMLInputElement;
+      await user.type(medName, 'Aspirin');
+      await saveSection(user, /save and next/i);
+
+      // Section 4 — a second Condition (nursing diagnosis) and a CarePlan.
+      await goToStep(user, 'Diagnosis & Disposition');
+      await user.type(fieldInput('1.'), 'Risk for withdrawal');
+      await user.click(checkbox('Cleared for general population'));
+      await saveSection(user, /save diagnosis & disposition/i);
+
+      // captureWrites records the pre-save literal passed to upsertResource,
+      // which has no server-assigned `.id` yet — fetch the real, persisted
+      // Encounter instead, the same way the task-24 tests above do.
+      const [encounter] = await medplum.searchResources('Encounter', {
+        identifier: `${SCREENING_ID_SYSTEM}|admission-encounter`,
+      });
+      expect(encounter?.id).toBeDefined();
+      const encounterRef = `Encounter/${encounter.id}`;
+
+      const observation = capture.written.find(
+        (r) => r.resourceType === 'Observation' && (r as Observation).code?.text === 'Body temperature'
+      ) as Observation | undefined;
+      const allergy = capture.written.find((r) => r.resourceType === 'AllergyIntolerance') as
+        | { encounter?: { reference?: string } }
+        | undefined;
+      const chronicCondition = capture.written.find(
+        (r) => r.resourceType === 'Condition' && (r as { code?: { text?: string } }).code?.text === 'Asthma'
+      ) as { encounter?: { reference?: string } } | undefined;
+      const nursingDiagnosis = capture.written.find(
+        (r) => r.resourceType === 'Condition' && (r as { code?: { text?: string } }).code?.text === 'Risk for withdrawal'
+      ) as { encounter?: { reference?: string } } | undefined;
+      const medication = capture.written.find((r) => r.resourceType === 'MedicationStatement') as
+        | { context?: { reference?: string } }
+        | undefined;
+      const carePlan = capture.written.find((r) => r.resourceType === 'CarePlan') as
+        | { encounter?: { reference?: string } }
+        | undefined;
+
+      expect(observation?.encounter?.reference).toBe(encounterRef);
+      expect(allergy?.encounter?.reference).toBe(encounterRef);
+      expect(chronicCondition?.encounter?.reference).toBe(encounterRef);
+      expect(nursingDiagnosis?.encounter?.reference).toBe(encounterRef);
+      // MedicationStatement's field is named `context`, not `encounter`.
+      expect(medication?.context?.reference).toBe(encounterRef);
+      expect(carePlan?.encounter?.reference).toBe(encounterRef);
+
+      expect(capture.validationErrors).toEqual([]);
+    });
+
+    // The stale-closure hazard this task's own doc comment warns about: if a
+    // save handler read `encounter` state instead of the resolved reference,
+    // a section saved before the Encounter existed in state could silently
+    // omit the link, or two sections could each create their own Encounter.
+    // Saving section 2 alone (without ever saving section 1 first) must
+    // still create exactly one Encounter and link to it.
+    test('a section other than Patient Information still creates and links to one Encounter', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      // Skip section 1 entirely — go straight to Current Health Status.
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Latex allergy'));
+      await saveSection(user, /save and next/i);
+
+      // captureWrites' input literal has no `.id` — see the note in the test
+      // above. Confirming via the input alone that exactly one upsert call
+      // targeted Encounter is still a real, useful assertion, though: it
+      // proves ensureEncounterRef() didn't fire twice within one save.
+      const encounterWrites = capture.written.filter((r) => r.resourceType === 'Encounter');
+      expect(encounterWrites).toHaveLength(1);
+
+      const [encounter] = await medplum.searchResources('Encounter', {
+        identifier: `${SCREENING_ID_SYSTEM}|admission-encounter`,
+      });
+      expect(encounter?.id).toBeDefined();
+
+      const allergy = capture.written.find((r) => r.resourceType === 'AllergyIntolerance') as {
+        encounter?: { reference?: string };
+      };
+      expect(allergy.encounter?.reference).toBe(`Encounter/${encounter.id}`);
+    });
+
+    // Re-saving a later section after the admission Encounter was already
+    // created (in an earlier section's save) must reuse it, not create a
+    // second admission for the same patient.
+    test('a later section reuses the Encounter an earlier section already created', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), 'Doe');
+      await saveSection(user, /save and next/i);
+
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Latex allergy'));
+      await saveSection(user, /save and next/i);
+
+      const encounters = await medplum.searchResources('Encounter', {
+        identifier: `${SCREENING_ID_SYSTEM}|admission-encounter`,
+      });
+      expect(encounters).toHaveLength(1);
+
+      const [allergy] = await medplum.searchResources('AllergyIntolerance', {
+        identifier: `${SCREENING_ID_SYSTEM}|allergy::Latex allergy`,
+      });
+      expect(allergy.encounter?.reference).toBe(`Encounter/${encounters[0].id}`);
+    });
+
+    // The embedding case (App.tsx's /admission-screening/:patientId/:encounterId
+    // route) must keep working exactly as before this task: when the wizard is
+    // told which Encounter to use, it links resources to THAT one and does not
+    // create its own admission Encounter alongside it.
+    test('an explicit :encounterId route param is used as-is, with no admission Encounter created', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const patient = await medplum.createResource({ resourceType: 'Patient', name: [{ family: 'Doe' }] });
+      const existingEncounter = await medplum.createResource({
+        resourceType: 'Encounter',
+        status: 'in-progress',
+        class: { code: 'AMB' },
+        subject: { reference: `Patient/${patient.id}` },
+      } as Resource);
+      const capture = captureWrites(medplum);
+      const user = userEvent.setup();
+
+      await act(async () => {
+        render(
+          <MantineProvider>
+            <Notifications />
+            <MedplumProvider medplum={medplum}>
+              <MemoryRouter initialEntries={[`/admission-screening/${patient.id}/${existingEncounter.id}`]}>
+                <Routes>
+                  <Route
+                    path="/admission-screening/:patientId/:encounterId"
+                    element={<AdmissionHealthScreeningWizard />}
+                  />
+                </Routes>
+              </MemoryRouter>
+            </MedplumProvider>
+          </MantineProvider>
+        );
+      });
+
+      await goToStep(user, 'Current Health Status');
+      await user.click(checkbox('Latex allergy'));
+      await saveSection(user, /save and next/i);
+
+      expect(capture.written.some((r) => r.resourceType === 'Encounter')).toBe(false);
+
+      const allergy = capture.written.find((r) => r.resourceType === 'AllergyIntolerance') as {
+        encounter?: { reference?: string };
+      };
+      expect(allergy.encounter?.reference).toBe(`Encounter/${existingEncounter.id}`);
+    });
+  });
+
   describe('save and next (task 43)', () => {
     /** True when the wizard is showing Current Health Status (section 2). */
     function onHealthStatus(): boolean {

@@ -101,6 +101,11 @@ export function AdmissionHealthScreeningWizard({
   const form = useFormState();
 
   const [patient, setPatient] = useState<Patient | undefined>();
+  // Mirrors `patient` state exactly, for the same reason: `ensureEncounterRef`
+  // needs to know whether the admission Encounter has already been created
+  // this session, without a save handler ever reading this directly (see the
+  // stale-closure warning on `ensurePatientRef`/`ensureEncounterRef`).
+  const [encounter, setEncounter] = useState<Encounter | undefined>();
   // The facility's stable code, not its name — see djsFacilities.ts. Storing
   // the name here instead would make a rename look like a different facility.
   const [facilityCode, setFacilityCode] = useState('');
@@ -253,10 +258,6 @@ export function AdmissionHealthScreeningWizard({
     }
   }
 
-  const encounterRef: Encounter['subject'] | undefined = encounterId
-    ? { reference: `Encounter/${encounterId}` }
-    : undefined;
-
   /**
    * Scopes an upsert to this patient so an identifier can repeat across
    * patients without colliding. `param` differs by resource type —
@@ -291,9 +292,17 @@ export function AdmissionHealthScreeningWizard({
    * code covers many items. Deriving it rather than hand-writing a key per
    * call site means the key cannot drift out of sync with the resource it
    * labels, which is the failure mode this file has a long history of.
+   *
+   * `encounterRef` is a required, explicit parameter — never read from
+   * `encounter` state inside this function. That state is set asynchronously
+   * after a write completes (see `ensureEncounterRef`), so reading it directly
+   * here would reproduce the exact stale-closure bug `ensurePatientRef()`
+   * exists to avoid: the caller must resolve the current reference and pass
+   * it in, the same way `subject` is already threaded.
    */
   async function obs(
     subject: Reference<Patient>,
+    encounterRef: Reference<Encounter> | undefined,
     partial: Partial<Observation>,
     itemKey?: string
   ): Promise<void> {
@@ -429,6 +438,7 @@ export function AdmissionHealthScreeningWizard({
    */
   async function saveObservationSet(
     subject: Reference<Patient>,
+    encounterRef: Reference<Encounter> | undefined,
     fields: { code: string; value?: Partial<Observation> }[]
   ): Promise<void> {
     // Vital signs must record WHEN the measurement was taken — the FHIR
@@ -469,7 +479,7 @@ export function AdmissionHealthScreeningWizard({
         continue;
       }
       liveKeys.add(field.code);
-      await obs(subject, {
+      await obs(subject, encounterRef, {
         code: { text: field.code },
         ...(VITAL_SIGN_DEFS[field.code] ? { effectiveDateTime: priorEffective.get(field.code) ?? now } : {}),
         ...field.value,
@@ -583,9 +593,9 @@ export function AdmissionHealthScreeningWizard({
    * deliberate approximation, not a confident mapping — revisit if DJS adopts
    * a more specific value set.
    */
-  async function saveAdmissionEncounter(subject: Reference<Patient>): Promise<void> {
+  async function saveAdmissionEncounter(subject: Reference<Patient>): Promise<WithId<Encounter>> {
     const locationRef = facilityCode ? await ensureFacilityLocation(facilityCode) : undefined;
-    await medplum.upsertResource<Encounter>(
+    const saved = await medplum.upsertResource<Encounter>(
       {
         resourceType: 'Encounter',
         status: 'in-progress',
@@ -603,15 +613,51 @@ export function AdmissionHealthScreeningWizard({
       } as Encounter,
       upsertQuery(ADMISSION_ENCOUNTER_KEY, subject)
     );
+    setEncounter(saved);
+    return saved;
+  }
+
+  /**
+   * Resolves the Encounter reference every save handler links its resources
+   * to. Every caller awaits this and uses its return value directly — never
+   * reads `encounter` state inside a handler — matching how `subject` is
+   * already threaded via `ensurePatientRef()`.
+   *
+   * If the wizard was launched with an explicit `encounterId` route param
+   * (embedded inside an already-existing encounter's own chart), that
+   * reference is used as-is and the wizard's own admission Encounter is never
+   * created — preserves the embedding case exactly as before this task.
+   * Otherwise the admission Encounter is ensured — created on whichever
+   * section saves first, same as `ensurePatientRef()` creates the Patient on
+   * whichever section saves first.
+   *
+   * The `encounter` state check below is a round-trip optimization, not a
+   * correctness guard: `saveAdmissionEncounter`'s own conditional upsert
+   * (keyed on `ADMISSION_ENCOUNTER_KEY`) is what actually prevents a second
+   * admission Encounter from ever being created, the same way it already
+   * does for re-saves within one section. Confirmed by mutation test —
+   * skipping the cache and always calling `saveAdmissionEncounter` still
+   * converges on one Encounter.
+   */
+  async function ensureEncounterRef(subject: Reference<Patient>): Promise<Reference<Encounter> | undefined> {
+    if (encounterId) {
+      return { reference: `Encounter/${encounterId}` };
+    }
+    const saved = encounter?.id ? (encounter as WithId<Encounter>) : await saveAdmissionEncounter(subject);
+    // Built by hand, not via `createReference`, matching `ensureFacilityLocation`'s
+    // reasoning: Encounter has no display-worthy field this would populate
+    // from anyway, so there's nothing to gain and no reason to introduce the
+    // dependency.
+    return { reference: `Encounter/${saved.id}` };
   }
 
   async function saveDemographics(): Promise<void> {
     const subject = createReference(await savePatientRecord());
     const initials = form.text('mandated-reporter-initials');
 
-    await saveAdmissionEncounter(subject);
+    const encounterRef = await ensureEncounterRef(subject);
 
-    await saveObservationSet(subject, [
+    await saveObservationSet(subject, encounterRef, [
       { code: 'Hair color', value: form.text('hair-color') ? { valueString: form.text('hair-color') } : undefined },
       { code: 'Eye color', value: form.text('eye-color') ? { valueString: form.text('eye-color') } : undefined },
       {
@@ -628,7 +674,7 @@ export function AdmissionHealthScreeningWizard({
     ]);
   }
 
-  async function saveVitals(subject: Reference<Patient>) {
+  async function saveVitals(subject: Reference<Patient>, encounterRef: Reference<Encounter> | undefined) {
     const bpComponents = buildBloodPressureComponents(systolic, diastolic);
     const visionFields: [string, string][] = [
       ['vision-nocorr-left', 'Visual acuity, left eye, without correction'],
@@ -639,7 +685,7 @@ export function AdmissionHealthScreeningWizard({
       ['vision-corr-both', 'Visual acuity, both eyes, with correction'],
     ];
 
-    await saveObservationSet(subject, [
+    await saveObservationSet(subject, encounterRef, [
       // Units are not repeated here: `obs()` applies each vital's unit and
       // UCUM code from VITAL_SIGN_DEFS, so the unit has one home.
       { code: 'Body temperature', value: temp ? { valueQuantity: { value: Number(temp) } } : undefined },
@@ -716,6 +762,10 @@ export function AdmissionHealthScreeningWizard({
           resourceType: 'MedicationStatement',
           status: 'active',
           subject,
+          // MedicationStatement's encounter-link field is named `context`,
+          // not `encounter` — verified against @medplum/fhirtypes rather than
+          // assumed, since every other resource here uses `encounter`.
+          context: encounterRef,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           medicationCodeableConcept: { text: name },
           dosage: builtDosage ? [builtDosage] : undefined,
@@ -738,7 +788,7 @@ export function AdmissionHealthScreeningWizard({
   // ---- Save handlers: Sections 3–4 ----
 
   /** Current Health Status (allergies card): allergies -> AllergyIntolerance, chronic conditions -> Condition */
-  async function saveAllergiesChronic(subject: Reference<Patient>) {
+  async function saveAllergiesChronic(subject: Reference<Patient>, encounterRef: Reference<Encounter> | undefined) {
     const allergyKeys = new Set<string>();
     for (const item of form.checkedItems('allergy')) {
       if (item === 'No known allergies') continue;
@@ -748,6 +798,7 @@ export function AdmissionHealthScreeningWizard({
         {
           resourceType: 'AllergyIntolerance',
           patient: subject,
+          encounter: encounterRef,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           // Required by constraint ait-1 — see ALLERGY_CLINICAL_SYSTEM above.
           clinicalStatus: ACTIVE_ALLERGY_STATUS,
@@ -769,6 +820,7 @@ export function AdmissionHealthScreeningWizard({
           {
             resourceType: 'Condition',
             subject,
+            encounter: encounterRef,
             identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
             clinicalStatus: ACTIVE_CONDITION_STATUS,
             code: { text: form.checkTextMap('chronic-list')[item] || item },
@@ -785,7 +837,7 @@ export function AdmissionHealthScreeningWizard({
     // derives its retraction scope from these codes, so clearing any one later
     // withdraws its Observation rather than leaving a stale value.
     const epipen = form.chip('epipen');
-    await saveObservationSet(subject, [
+    await saveObservationSet(subject, encounterRef, [
       {
         code: 'Epi-Pen prescribed or previously used',
         value: epipen
@@ -814,7 +866,7 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /** Current Health Status (appearance card): appearance/mental-status findings -> Observation */
-  async function saveMentalStatus(subject: Reference<Patient>) {
+  async function saveMentalStatus(subject: Reference<Patient>, encounterRef: Reference<Encounter> | undefined) {
     const APPEARANCE_CODE = 'Appearance/mental status finding';
     const liveKeys = new Set<string>();
     for (const item of form.checkedItems('appearance')) {
@@ -825,6 +877,7 @@ export function AdmissionHealthScreeningWizard({
       // silently discarded on save. Same epipen/task-18/19 class of bug.
       await obs(
         subject,
+        encounterRef,
         { code: { text: APPEARANCE_CODE }, valueString: form.checkTextMap('appearance')[item] || item },
         item
       );
@@ -833,7 +886,7 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /** Section 3 (Review of Systems): every checked ROS/injury item -> Observation, tagged with its system */
-  async function saveReviewOfSystems(subject: Reference<Patient>) {
+  async function saveReviewOfSystems(subject: Reference<Patient>, encounterRef: Reference<Encounter> | undefined) {
     const systems: [string, string][] = [
       ['injuries', 'Injuries/trauma'],
       ['firearm-safety', 'Injury prevention'],
@@ -854,27 +907,27 @@ export function AdmissionHealthScreeningWizard({
         if (item.startsWith('No problems') || item.startsWith('No significant')) continue;
         const code = `Review of systems: ${label}`;
         liveKeys.add(`${code}::${item}`);
-        await obs(subject, { code: { text: code }, valueString: form.checkTextMap(grid)[item] || item }, item);
+        await obs(subject, encounterRef, { code: { text: code }, valueString: form.checkTextMap(grid)[item] || item }, item);
       }
     }
     if (form.text('last-dental-exam')) {
       liveKeys.add(DENTAL_EXAM);
-      await obs(subject, { code: { text: DENTAL_EXAM }, valueString: form.text('last-dental-exam') });
+      await obs(subject, encounterRef, { code: { text: DENTAL_EXAM }, valueString: form.text('last-dental-exam') });
     }
     if (form.text('vision-exam-date') || form.text('vision-provider')) {
       liveKeys.add(VISION_EXAM);
-      await obs(subject, {
+      await obs(subject, encounterRef, {
         code: { text: VISION_EXAM },
         valueString: `Date: ${form.text('vision-exam-date') || '—'}, provider: ${form.text('vision-provider') || '—'}`,
       });
     }
     if (form.text('ros-comments')) {
       liveKeys.add(ROS_COMMENTS);
-      await obs(subject, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
+      await obs(subject, encounterRef, { code: { text: ROS_COMMENTS }, valueString: form.text('ros-comments') });
     }
     if (form.text('injuries-detail')) {
       liveKeys.add(INJURIES_DETAIL);
-      await obs(subject, { code: { text: INJURIES_DETAIL }, valueString: form.text('injuries-detail') });
+      await obs(subject, encounterRef, { code: { text: INJURIES_DETAIL }, valueString: form.text('injuries-detail') });
     }
 
     // Scope covers both the checklist rows (which carry a `::item` suffix) and
@@ -889,7 +942,10 @@ export function AdmissionHealthScreeningWizard({
   }
 
   /** Section 4 (Diagnosis & Disposition): nursing diagnoses -> Condition, plan items -> CarePlan note, sign-off -> Observation w/ note */
-  async function saveDiagnosisDisposition(subject: Reference<Patient>) {
+  async function saveDiagnosisDisposition(
+    subject: Reference<Patient>,
+    encounterRef: Reference<Encounter> | undefined
+  ) {
     const diagnosisKeys = new Set<string>();
     for (const field of ['dx1', 'dx2', 'dx3', 'dx4']) {
       const val = form.text(field);
@@ -903,6 +959,7 @@ export function AdmissionHealthScreeningWizard({
           {
             resourceType: 'Condition',
             subject,
+            encounter: encounterRef,
             identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
             // Required by constraint con-3, same as the chronic conditions
             // above. Its absence here was a latent copy of the ait-1 failure.
@@ -923,13 +980,14 @@ export function AdmissionHealthScreeningWizard({
           status: 'active',
           intent: 'plan',
           subject,
+          encounter: encounterRef,
           identifier: [{ system: SCREENING_ID_SYSTEM, value: key }],
           description: planItems.join('; '),
         } as any,
         upsertQuery(key, subject)
       );
     }
-    await obs(subject, {
+    await obs(subject, encounterRef, {
       code: { text: 'Admission health screening sign-off' },
       valueString: `Nurse: ${form.text('nurse-signature') || '—'}; Physician: ${form.text('physician-signature') || '—'}`,
       note: form.text('health-alerts') ? [{ text: form.text('health-alerts') }] : undefined,
@@ -938,7 +996,7 @@ export function AdmissionHealthScreeningWizard({
     // Task 19: disposition-notes, signoff-datetime, and review-date were
     // rendered in the JSX but read by no save handler, so the nurse's input
     // was silently discarded — the same epipen/task-18 class of data loss.
-    await saveObservationSet(subject, [
+    await saveObservationSet(subject, encounterRef, [
       {
         // NOT the field's on-screen label verbatim: that label contains
         // commas, and every identifier here is derived from code.text (see
@@ -1218,9 +1276,10 @@ export function AdmissionHealthScreeningWizard({
                   onClick={() =>
                     runSave('health-status', 'Health status saved', async () => {
                       const subject = await ensurePatientRef();
-                      await saveVitals(subject);
-                      await saveAllergiesChronic(subject);
-                      await saveMentalStatus(subject);
+                      const encounterRef = await ensureEncounterRef(subject);
+                      await saveVitals(subject, encounterRef);
+                      await saveAllergiesChronic(subject, encounterRef);
+                      await saveMentalStatus(subject, encounterRef);
                     }, 3)
                   }
                 >
@@ -1271,7 +1330,16 @@ export function AdmissionHealthScreeningWizard({
                   className="djs-btn"
                   disabled={savingSection === 'ros'}
                   onClick={() =>
-                    runSave('ros', 'Review of systems saved', async () => saveReviewOfSystems(await ensurePatientRef()), 4)
+                    runSave(
+                      'ros',
+                      'Review of systems saved',
+                      async () => {
+                        const subject = await ensurePatientRef();
+                        const encounterRef = await ensureEncounterRef(subject);
+                        await saveReviewOfSystems(subject, encounterRef);
+                      },
+                      4
+                    )
                   }
                 >
                   {savingSection === 'ros' ? 'Saving…' : 'Save and next'}
@@ -1309,9 +1377,11 @@ export function AdmissionHealthScreeningWizard({
                   className="djs-btn"
                   disabled={savingSection === 'disposition'}
                   onClick={() =>
-                    runSave('disposition', 'Diagnosis & disposition saved', async () =>
-                      saveDiagnosisDisposition(await ensurePatientRef())
-                    )
+                    runSave('disposition', 'Diagnosis & disposition saved', async () => {
+                      const subject = await ensurePatientRef();
+                      const encounterRef = await ensureEncounterRef(subject);
+                      await saveDiagnosisDisposition(subject, encounterRef);
+                    })
                   }
                 >
                   {savingSection === 'disposition' ? 'Saving…' : 'Save diagnosis & disposition'}

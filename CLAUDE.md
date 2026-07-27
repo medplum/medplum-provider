@@ -200,7 +200,21 @@ prefixes are what keep them apart.
 `param` argument threaded through `upsertQuery`/`retractStale`.
 
 **`ensurePatientRef()` must be used for the subject**, never `patient`
-state read directly inside a save handler — see "Bug classes."
+state read directly inside a save handler — see "Bug classes." Likewise
+**`ensureEncounterRef()` for the encounter link** — every
+Observation/Condition/AllergyIntolerance/CarePlan write includes
+`encounter: encounterRef`, and every `MedicationStatement` includes
+`context: encounterRef` (a different field name, verified against
+`@medplum/fhirtypes`, not assumed). If launched with an explicit
+`:encounterId` route param (embedded case), that reference is used as-is
+and the wizard never creates its own admission Encounter; otherwise the
+admission Encounter is created on whichever section saves first — same
+pattern as `ensurePatientRef()` creating the Patient on whichever section
+saves first. **What actually prevents a duplicate Encounter is
+`saveAdmissionEncounter`'s conditional upsert on `ADMISSION_ENCOUNTER_KEY`,
+not the `encounter` state cache** — confirmed by mutation test: removing
+the cache and always re-calling `saveAdmissionEncounter` still converges
+on one Encounter. The cache is a round-trip optimization only.
 
 **`runSave(key, message, fn)`** wraps each button with a pending state and
 success/error toasts. Never fire a save handler bare from `onClick`.
