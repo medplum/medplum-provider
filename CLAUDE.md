@@ -199,6 +199,23 @@ are ever reattempted, budget for this — a bundle write may need a delay or
 a different confirmation strategy before anything downstream searches for
 what it just wrote.
 
+**The server accepts component panels and coded vitals — but acceptance is
+not profile validation.** Confirmed live 2026-07-26 (all 9 live tests, run
+twice): Medplum stores an Observation whose value lives entirely in
+`component` with no top-level `value[x]` (the BP panel), and one carrying
+LOINC codings, `category: vital-signs`, UCUM units and `effectiveDateTime`,
+round-tripping all of it intact. `effectiveDateTime` preservation across a
+re-save also holds on the real server, not just against `MockClient`.
+
+**What this does *not* establish:** that the server checks conformance to
+the vital-signs profile. A green result means "not rejected", which is
+indistinguishable from "not validated". Don't infer from this that the
+server will catch a future profile violation — assume it won't, and keep
+that check in our own tests. Given `validateResource` is already how the
+offline suite compensates for `MockClient`, the practical rule is the same
+either way: **profile conformance is our responsibility, not the
+platform's.**
+
 **`MockClient` does not enforce FHIR invariants.** It stores a
 constraint-violating resource (missing required `clinicalStatus`, etc.)
 without complaint. The unit suite's `captureWrites` + `validateResource`

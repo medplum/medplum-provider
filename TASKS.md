@@ -336,6 +336,9 @@ changing it would orphan every previously saved reading.
 `DjsPatientSummary` needed updating too: a component-only panel has no
 top-level `value[x]`, so it would otherwise have rendered `—`.
 
+**Verified live 2026-07-26** — all 9 live tests pass, run twice, so both
+the create and re-save paths are covered on a real server.
+
 Mutation-verified twice, including a **transposed-LOINC** mutation
 (systolic code on the diastolic component) — a silent clinical error a
 round-trip test can't catch, since both sides would use the same constant.
