@@ -30,6 +30,7 @@ const SETUP_DISMISSED_KEY = 'medplum-provider-setup-completed';
 const PROVIDER_HIDE_GET_STARTED_SETTING = 'hideGetStarted';
 
 import { AdmissionHealthScreeningWizard } from './pages/AdmissionHealthScreeningWizard';
+import { AdmissionScreeningDemoPage } from './pages/AdmissionScreeningDemoPage';
 import { EncounterChartPage } from './pages/encounter/EncounterChartPage';
 import { EncounterModal } from './pages/encounter/EncounterModal';
 import { FaxPage } from './pages/fax/FaxPage';
@@ -185,6 +186,17 @@ export function App(): JSX.Element | null {
     >
       <Suspense fallback={<Loading />}>
         <Routes>
+          {/*
+            Task 38: a no-credentials preview of the DJS wizard against an
+            in-memory MockClient, replacing the stale preview.html. Outside
+            the profile-gated branch below on purpose — the whole point is
+            reachability without a real Medplum session — and dev-only via
+            import.meta.env.DEV, since this is a tool for people working on
+            the wizard, not an end-user feature to ship.
+          */}
+          {import.meta.env.DEV && (
+            <Route path="/demo/admission-screening" element={<AdmissionScreeningDemoPage />} />
+          )}
           {profile ? (
             <>
               <Route path="/getstarted" element={<GetStartedPage />} />

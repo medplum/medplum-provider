@@ -444,22 +444,27 @@ changed a line, that's a line-ending problem worth investigating, but
 reach for `git config core.autocrlf` / `.gitattributes` rather than
 rewriting the file.
 
-## `preview.html` — **deprecated, being removed (task 38)**
+## No-credentials preview: `/demo/admission-screening` (task 38)
 
-**Don't trust it, and don't spend effort updating it.** Verified stale
-2026-07-26: it missed the last two UI changes (blood pressure is still one
-`120/80` box; facility is still a free-text input, not the closed
-`<select>`), and it never loads `tokens.css` so it isn't a valid styling
-reference either. Being replaced by a `MockClient`-backed demo route that
-renders the real wizard — same no-credentials capability, in sync by
-construction. See TASKS.md task 38.
+Replaces the old hand-maintained `preview.html`, which drifted out of sync
+with the real UI twice (missed the blood-pressure split and the facility
+dropdown becoming a closed `<select>`) and never loaded `tokens.css`, so it
+wasn't a valid styling reference either.
 
-Original description, for context until it's removed:
+`AdmissionScreeningDemoPage.tsx` renders the **real** wizard component
+against an in-memory `MockClient`, wrapped in its own `MedplumProvider` that
+shadows the app's real one for that subtree — the exact pattern the test
+suite already uses (`renderWizard(new MockClient())`), just as a real page
+instead of a test harness. It can't drift out of sync with the UI, because
+it *is* the UI, not a copy of it.
 
-Static, dependency-free mirror of the wizard for a quick visual check with
-no build step. **Hand-maintained, not generated** — update it in the same
-change if you alter section count or content, or it drifts. Doesn't load
-Mantine or `tokens.css`, so it's not a valid test surface for either.
+Routed in `App.tsx` **outside** the `profile ?` authenticated branch (the
+whole point is reachability without a real Medplum session) and gated by
+`import.meta.env.DEV` — verified this actually strips it from the
+production bundle (`grep`'d the built JS for the banner text: zero
+occurrences), not just assumed from Vite's usual dead-code-elimination
+behavior. A visible "DEMO MODE" banner makes it unmistakable that nothing
+entered persists past the page.
 
 ## Sensitive-content note
 

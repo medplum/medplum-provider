@@ -56,6 +56,9 @@ upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
 - **36** — every resource type (not just Observation) now links to the
   admission Encounter, or to an explicit `:encounterId` route param when
   embedded (see `CLAUDE.md`).
+- **38** — `preview.html` deleted; replaced by `/demo/admission-screening`
+  (dev-only, real wizard against `MockClient`, verified stripped from the
+  production bundle — see `CLAUDE.md`).
 
 ---
 
@@ -142,18 +145,6 @@ mutation-tested finding on what actually prevents duplicate Encounters
 `djsFacilities.ts` are a distinct class (Youth Centers) with no known
 canonical type code — model the grouping structurally rather than guess a
 `Location.type`.
-
-**Task 38 — replace `preview.html` with a `MockClient`-backed demo route.**
-`preview.html` is a hand-maintained static mirror that drifts by
-construction (already missed two UI changes) and never loads `tokens.css`.
-Don't just delete it — it serves a real need (viewing the UI without
-Medplum credentials, which incoming design/product folks need). Approach:
-a demo route rendering the real wizard inside `MedplumProvider` +
-`MockClient` — already proven, since the test suite does exactly this via
-`renderWizard(new MockClient())`. Get two things right: make it
-unmistakably a demo (a visible banner, not just a URL), and decide whether
-it ships in the production build (lean dev-only). Then remove the
-`preview.html` references in `README.md`/`CLAUDE.md`/`CONTRIBUTING.md`.
 
 **Task 39 — patient edit fails: server has no `us-core-patient`
 StructureDefinition. Deprioritized, not abandoned.** Root cause confirmed:

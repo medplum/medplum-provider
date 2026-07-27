@@ -52,9 +52,11 @@ The wizard lives at `/admission-screening[/:patientId[/:encounterId]]`, plus an
 project to sign into — `.env` ships as the stock template with an empty client
 ID, so point `MEDPLUM_BASE_URL` at your project or a local server on `:8103`.
 
-`preview.html` is a stale, hand-maintained static mirror of the wizard —
-**don't trust it or spend effort updating it**; it's being replaced by a
-`MockClient`-backed demo route (task 38 in `TASKS.md`).
+**No credentials? Visit `/demo/admission-screening`** (dev server only —
+`npm run dev`, dev-only route, stripped from production builds). Renders the
+real wizard against an in-memory `MockClient`, with an unmistakable "DEMO
+MODE" banner. Replaces the old hand-maintained `preview.html`, which
+drifted out of sync with the real UI and never loaded `tokens.css`.
 
 ---
 
@@ -134,13 +136,14 @@ src/
     patient/PatientOverviewPage.tsx — the "Overview" tab on the patient page;
                           combines the DJS screening summary with the same
                           sections Medplum's default PatientSummary shows
+    AdmissionScreeningDemoPage.tsx — no-credentials demo route (dev-only,
+                          see "Quick start" above); replaces the old preview.html
   components/
     SidebarStepper · PatientBand · Card · ChipGroup · CheckGrid
     FormControls · Callout · DynamicTable · MarylandChrome
   theme/
     tokens.css          — design tokens and every .djs-* class (loads globally)
     mantine-theme.ts    — intentionally unused; see below
-preview.html            — static preview, hand-maintained
 ```
 
 Two things that surprise people:
