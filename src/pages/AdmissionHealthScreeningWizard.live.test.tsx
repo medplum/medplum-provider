@@ -337,6 +337,9 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       expect(codesAfterCheck).not.toContain('entered-in-error');
 
       // Uncheck it and save again — it must be withdrawn, not deleted.
+      // task 43: the check-and-save above auto-advanced to the next section,
+      // so the checkbox isn't rendered here until we navigate back to it.
+      await goToStep(user, 'Current Health Status');
       await user.click(checkbox('Latex allergy'));
       await saveSection(user, /save and next/i);
 
@@ -408,6 +411,10 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       });
 
       // Re-saving must update the admission in place, not open a second one.
+      // task 43: the first save above auto-advanced to the next section —
+      // without navigating back, this would save THAT section instead of
+      // actually re-saving Patient Information.
+      await goToStep(user, 'Patient Information');
       await saveSection(user, /save and next/i);
       const afterResave = await medplum.searchResources('Encounter', {
         subject: `Patient/${patient.id}`,
@@ -614,6 +621,9 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
         identifier: `${SCREENING_ID_SYSTEM}|Body temperature`,
       };
       const [before] = await medplum.searchResources('Observation', tempQuery);
+      // task 43: the prior save above auto-advanced to the next section, so
+      // Pulse isn't rendered here until we navigate back to it.
+      await goToStep(user, 'Current Health Status');
       await user.type(fieldInput('Pulse'), '72');
       await saveSection(user, /save and next/i);
       const [after] = await medplum.searchResources('Observation', tempQuery);

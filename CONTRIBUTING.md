@@ -190,8 +190,21 @@ Catches type errors, including in tests. Also run this.
 npm run dev
 ```
 
-Runs the app locally. Needs a Medplum server to sign into — ask a developer to
-get you set up the first time.
+Runs the app locally at `http://localhost:3001`. The full app (Patients,
+Tasks, Schedule, etc.) needs a real Medplum server to sign into — ask a
+developer to get you set up the first time.
+
+**For previewing or testing the DJS admission-screening wizard
+specifically, you don't need any of that.** With `npm run dev` running,
+go to `http://localhost:3001/demo/admission-screening` — no Medplum
+account, no server setup, nothing to ask a developer for. It's the real
+wizard component, backed by an in-memory store instead of a real server, so
+what you see is what actually ships — not a static mockup that can fall out
+of sync. A red "DEMO MODE" banner confirms you're on it. Nothing you enter
+is saved anywhere or real patient data, and it resets the moment you leave
+the page — so this is for looking at and clicking through the UI, not for
+testing that data persists or reopens correctly (that needs
+`npm run test:live` below, or a developer's help).
 
 ```bash
 npm run test:live
