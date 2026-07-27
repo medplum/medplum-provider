@@ -107,13 +107,20 @@ async function selectFacility(user: ReturnType<typeof userEvent.setup>, name: st
   await user.selectOptions(select, screen.getByRole('option', { name }));
 }
 
-/** Clicks a section's save button and waits for the save to settle (button re-enabled). */
+/**
+ * Clicks a section's save button and waits for the save to settle.
+ *
+ * Waits for the pending state to clear rather than for the clicked button to
+ * re-enable: since task 43 a successful save advances to the next step, so
+ * that button may no longer exist. A real network round-trip is slower than
+ * MockClient, hence the generous timeout rather than testing-library's 1s
+ * default.
+ */
 async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName: RegExp): Promise<void> {
-  const button = (): HTMLElement => screen.getByRole('button', { name: buttonName });
-  await user.click(button());
-  // A real network round-trip is slower than MockClient — give it real room
-  // rather than testing-library's 1s default waitFor timeout.
-  await waitFor(() => expect(button()).not.toBeDisabled(), { timeout: 15_000 });
+  await user.click(screen.getByRole('button', { name: buttonName }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /saving…/i })).not.toBeInTheDocument(), {
+    timeout: 15_000,
+  });
 }
 
 /** The sidebar step buttons share a name with the section header / save button, so match by class. */
@@ -198,7 +205,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await user.type(fieldInput('Color of hair'), 'Brown');
 
       // --- First save: creates the Patient, upserts the Hair color Observation. ---
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       const [createdPatient] = (await medplum.searchResources('Patient', { family: runTag })) as WithId<Patient>[];
       expect(createdPatient).toBeDefined();
@@ -212,7 +219,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       const firstObservationId = firstObservations[0].id;
 
       // --- Second save: same section, same values, nothing edited in between. ---
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       // Real proof of idempotency against the real server: not a spy on which
       // client method got called, but the actual resulting resource count.
@@ -244,7 +251,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
 
       // Section 1 — establish the Patient (found later by its unique family).
       await user.type(fieldInput('Last name'), family);
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
       createdPatientIds.push(patient.id);
@@ -260,7 +267,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await user.click(addMedication);
       const medName = addMedication.previousElementSibling?.querySelector('tbody tr td input') as HTMLInputElement;
       await user.type(medName, 'Aspirin');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       // Section 4 — a nursing-diagnosis Condition (con-3).
       await goToStep(user, 'Diagnosis & Disposition');
@@ -309,7 +316,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await renderWizard(medplum);
 
       await user.type(fieldInput('Last name'), family);
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
       createdPatientIds.push(patient.id);
@@ -322,7 +329,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       // Check the allergy and save — it should exist and be active.
       await goToStep(user, 'Current Health Status');
       await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const afterCheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
       expect(afterCheck).toHaveLength(1);
@@ -331,7 +338,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
 
       // Uncheck it and save again — it must be withdrawn, not deleted.
       await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const afterUncheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
       expect(afterUncheck).toHaveLength(1);
@@ -370,7 +377,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await user.type(fieldInput('Last name'), family);
       fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-20' } });
       await selectFacility(user, 'Cheltenham');
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
@@ -401,7 +408,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       });
 
       // Re-saving must update the admission in place, not open a second one.
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
       const afterResave = await medplum.searchResources('Encounter', {
         subject: `Patient/${patient.id}`,
         identifier: `${SCREENING_ID_SYSTEM}|${ADMISSION_ENCOUNTER_KEY}`,
@@ -427,7 +434,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
         await renderWizard(medplum);
         await user.type(fieldInput('Last name'), family);
         await selectFacility(user, 'Hickey');
-        await saveSection(user, /save demographics/i);
+        await saveSection(user, /save and next/i);
 
         const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
         expect(patient).toBeDefined();
@@ -488,7 +495,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await user.type(fieldInput('Last name'), family);
       fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-18' } });
       await selectFacility(user, 'Victor Cullen');
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
@@ -520,7 +527,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await renderWizard(medplum);
 
       await user.type(fieldInput('Last name'), family);
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
       createdPatientIds.push(patient.id);
@@ -528,7 +535,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await goToStep(user, 'Current Health Status');
       await user.type(screen.getByLabelText('Systolic'), '128');
       await user.type(screen.getByLabelText('Diastolic'), '82');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const [bp] = await medplum.searchResources('Observation', {
         subject: `Patient/${patient.id}`,
@@ -571,7 +578,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await renderWizard(medplum);
 
       await user.type(fieldInput('Last name'), family);
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
       const [patient] = (await medplum.searchResources('Patient', { 'family:exact': family })) as WithId<Patient>[];
       expect(patient).toBeDefined();
       createdPatientIds.push(patient.id);
@@ -579,7 +586,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       await goToStep(user, 'Current Health Status');
       await user.type(fieldInput('Temp (°F)'), '98.6');
       await user.type(fieldInput('Weight (lb)'), '150');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const expected: Record<string, { loinc: string; ucum: string; value: number }> = {
         'Body temperature': { loinc: '8310-5', ucum: '[degF]', value: 98.6 },
@@ -608,7 +615,7 @@ describe.skipIf(!CLIENT_ID || !CLIENT_SECRET)('AdmissionHealthScreeningWizard (l
       };
       const [before] = await medplum.searchResources('Observation', tempQuery);
       await user.type(fieldInput('Pulse'), '72');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
       const [after] = await medplum.searchResources('Observation', tempQuery);
       expect(after.id).toBe(before.id);
       expect(after.effectiveDateTime).toBe(before.effectiveDateTime);

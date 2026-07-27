@@ -224,11 +224,18 @@ function visionAcuityInput(index: 0 | 1 | 2 | 3 | 4 | 5): HTMLInputElement {
   return input;
 }
 
-/** Clicks a section's save button and waits for the save to settle (button re-enabled). */
+/**
+ * Clicks a section's save button and waits for the save to settle.
+ *
+ * Waits for the pending state to clear rather than for the clicked button to
+ * re-enable: since task 43 a successful save advances to the next step, so
+ * that button may no longer exist — and on the last section the next button
+ * has a different name entirely. Keying off "Saving…" works for both the
+ * advancing and non-advancing cases.
+ */
 async function saveSection(user: ReturnType<typeof userEvent.setup>, buttonName: RegExp): Promise<void> {
-  const button = (): HTMLElement => screen.getByRole('button', { name: buttonName });
-  await user.click(button());
-  await waitFor(() => expect(button()).not.toBeDisabled());
+  await user.click(screen.getByRole('button', { name: buttonName }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /saving…/i })).not.toBeInTheDocument());
 }
 
 describe('AdmissionHealthScreeningWizard', () => {
@@ -247,12 +254,14 @@ describe('AdmissionHealthScreeningWizard', () => {
       await user.type(fieldInput('Last name'), 'Doe');
       await user.type(fieldInput('Color of hair'), 'Brown');
 
-      const saveButton = (): HTMLElement => screen.getByRole('button', { name: /Save demographics/i });
+      const saveButton = (): HTMLElement => screen.getByRole('button', { name: /save and next/i });
 
       // --- First save: creates the Patient, upserts the Hair color Observation. ---
       await user.click(saveButton());
       await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(saveButton()).not.toBeDisabled());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /saving…/i })).not.toBeInTheDocument());
+      // The save advanced us to the next step (task 43); return to re-save.
+      await goToStep(user, 'Patient Information');
 
       const createdPatient = (await createSpy.mock.results[0].value) as WithId<Patient>;
       expect(createdPatient.resourceType).toBe('Patient');
@@ -304,7 +313,7 @@ describe('AdmissionHealthScreeningWizard', () => {
 
       await goToStep(user, 'Current Health Status');
       await user.click(checkbox('Insect allergy (bee, wasp, ant)'));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       // Filter client-side by exact identifier.value rather than searching by
       // it — the target key itself contains the comma under test, so a
@@ -321,7 +330,10 @@ describe('AdmissionHealthScreeningWizard', () => {
       const firstId = afterFirst[0].id;
 
       // Re-save the same section with nothing changed.
-      await saveSection(user, /save health status/i);
+      // A successful save now advances to the next step (task 43), so come
+      // back before saving this section again.
+      await goToStep(user, 'Current Health Status');
+      await saveSection(user, /save and next/i);
 
       const afterSecond = await findByKey();
       expect(afterSecond).toHaveLength(1);
@@ -347,7 +359,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       // Section 1 — Patient + a couple of demographic Observations.
       await user.type(fieldInput('Last name'), 'Doe');
       await user.type(fieldInput('Color of hair'), 'Brown');
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       // Section 2 — a vital Observation, an allergy (ait-1), a chronic
       // condition (con-3), and a medication with no dosage (ele-1).
@@ -364,7 +376,7 @@ describe('AdmissionHealthScreeningWizard', () => {
         'tbody tr td input'
       ) as HTMLInputElement;
       await user.type(medName, 'Aspirin');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       // Section 4 — a nursing-diagnosis Condition (con-3) and a CarePlan.
       await goToStep(user, 'Diagnosis & Disposition');
@@ -399,7 +411,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await goToStep(user, 'Current Health Status');
       await user.type(fieldInput('Temp (°F)'), '98.6');
       await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const nonPatientWrites = capture.written.filter((r) => r.resourceType !== 'Patient');
       expect(nonPatientWrites.length).toBeGreaterThan(0);
@@ -433,7 +445,7 @@ describe('AdmissionHealthScreeningWizard', () => {
 
       await goToStep(user, 'Current Health Status');
       await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       // Identify the allergy by its screening identifier alone — one patient in
       // this test, so no patient filter is needed, and it avoids depending on a
@@ -446,9 +458,14 @@ describe('AdmissionHealthScreeningWizard', () => {
         afterCheck[0].verificationStatus?.coding?.map((c) => c.code) ?? [];
       expect(retractedCodes1).not.toContain('entered-in-error');
 
+      // A successful save advances to the next step (task 43); come back.
+      await goToStep(user, 'Current Health Status');
       // Uncheck the same allergy and save again.
       await user.click(checkbox('Latex allergy'));
-      await saveSection(user, /save health status/i);
+      // A successful save now advances to the next step (task 43), so come
+      // back before saving this section again.
+      await goToStep(user, 'Current Health Status');
+      await saveSection(user, /save and next/i);
 
       const afterUncheck = await medplum.searchResources('AllergyIntolerance', allergyQuery);
       // Still exactly one resource — withdrawn, not deleted.
@@ -480,7 +497,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await goToStep(user, 'Current Health Status');
       // Report pain, but deliberately never touch the slider.
       await user.click(screen.getByRole('button', { name: /yes — has pain/i }));
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const pain = capture.written.find(
         (r) => r.resourceType === 'Observation' && (r as { code?: { text?: string } }).code?.text?.startsWith('Pain severity')
@@ -513,7 +530,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await user.type(fieldInput('Last name'), 'Doe');
       fireEvent.change(fieldInput('Date of admission'), { target: { value: '2026-07-20' } });
       await selectFacility(user, 'Cheltenham');
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
 
       const encounter = capture.written.find((r) => r.resourceType === 'Encounter') as Encounter | undefined;
       expect(encounter).toBeDefined();
@@ -548,8 +565,11 @@ describe('AdmissionHealthScreeningWizard', () => {
 
       await user.type(fieldInput('Last name'), 'Doe');
       await selectFacility(user, 'Hickey');
-      await saveSection(user, /save demographics/i);
-      await saveSection(user, /save demographics/i);
+      await saveSection(user, /save and next/i);
+      // A successful save now advances to the next step (task 43), so come
+      // back before saving this section again.
+      await goToStep(user, 'Patient Information');
+      await saveSection(user, /save and next/i);
 
       const locations = await medplum.searchResources('Location', {
         identifier: 'http://maryland.gov/djs/facility|hickey',
@@ -604,6 +624,58 @@ describe('AdmissionHealthScreeningWizard', () => {
     });
   });
 
+  describe('save and next (task 43)', () => {
+    /** True when the wizard is showing Current Health Status (section 2). */
+    function onHealthStatus(): boolean {
+      return screen.queryByText('Temp (°F)') !== null;
+    }
+
+    test('a successful save advances to the next section', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), 'Doe');
+      expect(onHealthStatus()).toBe(false);
+
+      await saveSection(user, /save and next/i);
+
+      await waitFor(() => expect(onHealthStatus()).toBe(true));
+    });
+
+    // The guarantee this feature turns on. Advancing after a failed save would
+    // hide the error toast behind a page change and make a lost section look
+    // like a completed one — the silent-data-loss pattern this codebase keeps
+    // hitting, which is exactly what the wizard must not do.
+    test('a FAILED save does not advance, so the error stays in front of the nurse', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      vi.spyOn(medplum, 'createResource').mockRejectedValue(new Error('server exploded'));
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await user.type(fieldInput('Last name'), 'Doe');
+      await saveSection(user, /save and next/i);
+
+      // Still on section 1, with the entered value intact to retry from.
+      expect(onHealthStatus()).toBe(false);
+      expect(fieldInput('Last name').value).toBe('Doe');
+    });
+
+    test('the final section has no next step, so it keeps a plain Save button', async () => {
+      const medplum = new MockClient();
+      medplum.mock.setProfile(DrAliceSmith);
+      const user = userEvent.setup();
+      await renderWizard(medplum);
+
+      await goToStep(user, 'Diagnosis & Disposition');
+
+      expect(screen.getByRole('button', { name: /save diagnosis & disposition/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /save and next/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe('vital-signs coding (task 26)', () => {
     /** Saves one of each vital and returns the written Observations by code.text. */
     async function saveVitalsAndCapture(): Promise<{ capture: WriteCapture; byCode: Map<string, Observation> }> {
@@ -625,7 +697,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       // to prove the enrichment is scoped rather than blanket.
       await user.click(screen.getByRole('button', { name: /yes — has a complaint/i }));
       await user.type(fieldTextarea('Specify'), 'Sore throat');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const byCode = new Map<string, Observation>();
       for (const r of capture.written) {
@@ -706,17 +778,22 @@ describe('AdmissionHealthScreeningWizard', () => {
 
       await goToStep(user, 'Current Health Status');
       await user.type(fieldInput('Temp (°F)'), '98.6');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const query = { identifier: `${SCREENING_ID_SYSTEM}|Body temperature` };
       const [first] = await medplum.searchResources('Observation', query);
       const firstEffective = first.effectiveDateTime;
       expect(firstEffective).toBeDefined();
 
+      // A successful save advances to the next step (task 43); come back.
+      await goToStep(user, 'Current Health Status');
       // Edit a different field and save again — the temperature reading was
       // not retaken, so its time must not move.
       await user.type(fieldInput('Pulse'), '72');
-      await saveSection(user, /save health status/i);
+      // A successful save now advances to the next step (task 43), so come
+      // back before saving this section again.
+      await goToStep(user, 'Current Health Status');
+      await saveSection(user, /save and next/i);
 
       const [second] = await medplum.searchResources('Observation', query);
       expect(second.id).toBe(first.id);
@@ -742,7 +819,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await goToStep(user, 'Current Health Status');
       await user.type(screen.getByLabelText('Systolic'), '128');
       await user.type(screen.getByLabelText('Diastolic'), '82');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const bp = capture.written.find(
         (r) => r.resourceType === 'Observation' && (r as Observation).code?.text === 'Blood pressure'
@@ -836,7 +913,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await user.type(inputs[0], 'Albuterol');
       await user.type(inputs[1], '2 mg');
       await user.type(inputs[2], 'BID');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const med = capture.written.find((r) => r.resourceType === 'MedicationStatement') as
         | { dosage?: { text?: string; timing?: { code?: { text?: string } }; doseAndRate?: { doseQuantity?: { value?: number; unit?: string; system?: string; code?: string } }[] }[] }
@@ -868,7 +945,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       await user.type(inputs[0], 'Ibuprofen');
       await user.type(inputs[1], '1-2 tablets');
       await user.type(inputs[2], 'as needed');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const med = capture.written.find((r) => r.resourceType === 'MedicationStatement') as
         | { dosage?: { text?: string; timing?: { code?: { text?: string } }; doseAndRate?: unknown[] }[] }
@@ -1184,12 +1261,12 @@ describe('AdmissionHealthScreeningWizard', () => {
       await user.type(fieldInput('Doctors / specialists managing these conditions'), 'Dr Chen (pulmonology)');
       await user.type(fieldInput('Primary care provider (if known)'), 'Dr Patel');
       await user.type(fieldTextarea('Additional comments'), 'Asthma well controlled on inhaler');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       // Review of systems → injuries detail.
       await goToStep(user, 'Review of Systems');
       await user.type(fieldTextarea('Details, dates, treatment'), 'Fractured wrist 2023, healed');
-      await saveSection(user, /save review of systems/i);
+      await saveSection(user, /save and next/i);
 
       // Identify each Observation by its screening identifier alone — one
       // patient in this test, so no subject filter is needed (and it avoids a
@@ -1265,7 +1342,7 @@ describe('AdmissionHealthScreeningWizard', () => {
       const otherCheckbox = checkboxInCard('Appearance & mental status', 'Other');
       await user.click(otherCheckbox);
       await user.type(inlineTextInput(otherCheckbox), 'Flat affect');
-      await saveSection(user, /save health status/i);
+      await saveSection(user, /save and next/i);
 
       const [obs] = await medplum.searchResources('Observation', {
         identifier: `${SCREENING_ID_SYSTEM}|Appearance/mental status finding::Other`,

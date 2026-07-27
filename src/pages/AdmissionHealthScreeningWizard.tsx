@@ -228,11 +228,24 @@ export function AdmissionHealthScreeningWizard({
    * failure) looked exactly like a successful one — nothing happened either
    * way, so there was no way to tell from the UI whether data landed.
    */
-  async function runSave(key: string, successMessage: string, save: () => Promise<void>): Promise<void> {
+  async function runSave(
+    key: string,
+    successMessage: string,
+    save: () => Promise<void>,
+    advanceTo?: number
+  ): Promise<void> {
     setSavingSection(key);
     try {
       await save();
       showSuccessNotification({ title: 'Saved', message: successMessage });
+      // Advance ONLY here — inside the try, after the save resolved. Never in
+      // `catch` or `finally`: moving the nurse to the next section when the
+      // save failed would hide the error toast behind a page change, and a
+      // failed save that looks like a completed step is precisely the
+      // silent-data-loss pattern this file has been bitten by repeatedly.
+      if (advanceTo !== undefined) {
+        goTo(advanceTo);
+      }
     } catch (err) {
       showErrorNotification(err);
     } finally {
@@ -1052,9 +1065,9 @@ export function AdmissionHealthScreeningWizard({
                   type="button"
                   className="djs-btn"
                   disabled={savingSection === 'demographics'}
-                  onClick={() => runSave('demographics', 'Demographics saved', saveDemographics)}
+                  onClick={() => runSave('demographics', 'Demographics saved', saveDemographics, 2)}
                 >
-                  {savingSection === 'demographics' ? 'Saving…' : 'Save demographics'}
+                  {savingSection === 'demographics' ? 'Saving…' : 'Save and next'}
                 </button>
               </section>
             )}
@@ -1208,10 +1221,10 @@ export function AdmissionHealthScreeningWizard({
                       await saveVitals(subject);
                       await saveAllergiesChronic(subject);
                       await saveMentalStatus(subject);
-                    })
+                    }, 3)
                   }
                 >
-                  {savingSection === 'health-status' ? 'Saving…' : 'Save health status'}
+                  {savingSection === 'health-status' ? 'Saving…' : 'Save and next'}
                 </button>
               </section>
             )}
@@ -1258,10 +1271,10 @@ export function AdmissionHealthScreeningWizard({
                   className="djs-btn"
                   disabled={savingSection === 'ros'}
                   onClick={() =>
-                    runSave('ros', 'Review of systems saved', async () => saveReviewOfSystems(await ensurePatientRef()))
+                    runSave('ros', 'Review of systems saved', async () => saveReviewOfSystems(await ensurePatientRef()), 4)
                   }
                 >
-                  {savingSection === 'ros' ? 'Saving…' : 'Save review of systems'}
+                  {savingSection === 'ros' ? 'Saving…' : 'Save and next'}
                 </button>
               </section>
             )}

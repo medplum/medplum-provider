@@ -550,8 +550,19 @@ coherent piece of work; task 36 belongs with them.
 
 **Low — polish**
 
-- **Task 43** — "Save and next". Easy, with one real trap: advance only
-  on a *successful* save, or a failed save gets hidden behind a page
-  change — the silent-data-loss pattern again.
+- **Task 43** — "Save and next" — **DONE.** Sections 1–3 advance on save;
+  section 4 keeps a plain "Save diagnosis & disposition" since there is no
+  next step. The advance happens **inside `runSave`'s `try`, after the save
+  resolves** — never in `catch` or `finally`. Mutation-verified by moving
+  it to `finally`, which fails exactly the one test that guards it.
+
+  Two things worth knowing if you touch this again. The test helper
+  `saveSection` used to wait for the clicked button to re-enable; that
+  breaks now, because a successful save can remove that button from the
+  page entirely. It waits on the "Saving…" state clearing instead, which
+  holds whether or not the section advances. And several existing tests
+  save, then keep working in the same section — those now need an explicit
+  `goToStep` back, which is a fair reflection of what a nurse would
+  actually do.
 - **Task 44** — export date inputs. Establish whether the page is ours or
   stock `medplum-provider` before patching a vendored file.
