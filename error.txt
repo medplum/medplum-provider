@@ -1,9 +1,0 @@
-Downloading https://packages.simplifier.net/hl7.fhir.us.core/9.0.0 ...                                                  Extracting ...
-Requesting an access token from http://localhost:8103/ ...
-Creating:
-C:\Users\anne\Desktop\medplum\opusclaude\medplum-provider\scripts\load-us-core-profiles.ps1 : FAILED to create  --
-server said:
-{"resourceType":"OperationOutcome","issue":[{"severity":"error","code":"invalid","details":{"text":"Incorrect resource
-type: expected StructureDefinition, but found "}}],"extension":[{"url":"https://medplum.com/fhir/StructureDefinition/tr
-acing","extension":[{"url":"requestId","valueId":"ee5e0ea7-53b4-4273-9429-b29df5cc859e"},{"url":"traceId","valueId":"1f
-aa519b-2e8a-495f-a8bf-9ae0c7c4c9c1"}]}]}
