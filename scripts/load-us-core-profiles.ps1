@@ -33,6 +33,11 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\load-us-core-profiles.ps1
 
 $ErrorActionPreference = 'Stop'
+# Invoke-WebRequest's default progress bar can corrupt output when the
+# console is redirected to a file (the "Downloading ... Extracting ..."
+# running together on one line, seen 2026-07-28, is this) — suppress it so
+# any captured log is actually readable.
+$ProgressPreference = 'SilentlyContinue'
 
 $BaseUrl = if ($env:MEDPLUM_LIVE_BASE_URL) { $env:MEDPLUM_LIVE_BASE_URL } else { 'http://localhost:8103/' }
 $ClientId = $env:MEDPLUM_LIVE_CLIENT_ID
@@ -98,12 +103,26 @@ try {
         }
 
         $raw = Get-Content $path -Raw
-        $parsed = $raw | ConvertFrom-Json
-        $url = $parsed.url
-        if (-not $url) {
-            Write-Warning "$file has no top-level `url` field — not the StructureDefinition we expected."
+        try {
+            $parsed = $raw | ConvertFrom-Json
+        }
+        catch {
+            Write-Warning "$file did not parse as JSON: $($_.Exception.Message)"
+            Write-Warning "First 300 chars of the file: $($raw.Substring(0, [Math]::Min(300, $raw.Length)))"
             continue
         }
+
+        # Seen 2026-07-28 against a Docker-hosted server: the file extracted
+        # without error but wasn't a usable FHIR resource, and the resulting
+        # failure gave no clue why. Check explicitly and dump enough of the
+        # actual content to diagnose it next time, instead of a blank error.
+        if ($parsed.resourceType -ne 'StructureDefinition' -or -not $parsed.url) {
+            Write-Warning "$file didn't contain a usable StructureDefinition."
+            Write-Warning "  resourceType found: '$($parsed.resourceType)'  url found: '$($parsed.url)'"
+            Write-Warning "  First 300 chars: $($raw.Substring(0, [Math]::Min(300, $raw.Length)))"
+            continue
+        }
+        $url = $parsed.url
 
         $searchUrl = "${BaseUrl}fhir/R4/StructureDefinition?url=$([uri]::EscapeDataString($url))&_count=1"
         $existing = Invoke-RestMethod -Method Get -Uri $searchUrl -Headers $authHeader

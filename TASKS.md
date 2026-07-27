@@ -621,10 +621,36 @@ against US Core profiles — direct confirmation, from the other direction,
 of the "acceptance is not validation" note already there. Profile
 conformance (tasks 26, 33) stays entirely our responsibility.
 
-**Still needed to close this out:** running one of the scripts against a
-live Project and confirming `Patient/:id/edit` actually works afterward —
-that needs a live server, so it's the hand-run verification step, same
-pattern as the live test suite.
+**Run 2026-07-28 against the Docker-hosted server — failed, descoped by
+user call.** The script downloaded and extracted the US Core package
+without error, got an access token fine, then failed creating the first
+StructureDefinition: the server rejected it with `"Incorrect resource
+type: expected StructureDefinition, but found "` (blank). Whatever the
+extracted file actually contained, it wasn't a usable FHIR resource — and
+neither script said why, which is itself a gap, fixed below.
+
+**Decision: park this rather than keep debugging blind.** Diagnosing the
+actual file content needs eyes on the user's filesystem, which isn't
+available this session, and would mean several more round-trips for what
+is (see below) a one-time setup annoyance, not something blocking other
+work. **Patient edit stays broken** until this is picked back up — noted
+so it isn't mistaken for fixed.
+
+**What was still worth doing immediately, regardless of the descope:**
+both scripts now check `resourceType` explicitly (not just presence of a
+`url` field) and, on failure, print what they actually found plus the
+first 300 chars of the file — so the *next* attempt gets a real signal
+instead of another blank error. Also suppressed PowerShell's
+`Invoke-WebRequest` progress bar (`$ProgressPreference =
+'SilentlyContinue'`), which was very likely corrupting the captured log —
+`error.txt`'s first line showed "Downloading ... Extracting ..." mashed
+onto one line with a large gap, the classic symptom of progress-bar output
+bleeding into a redirected file.
+
+**Task 39 is deprioritized, not abandoned.** If/when it's worth another
+attempt: re-run one of the scripts, and this time the failure output
+itself should say what's actually in the mismatched file rather than
+requiring another guess.
 
 ### Before touching 40–42: a short discovery spike
 

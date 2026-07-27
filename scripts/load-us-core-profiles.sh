@@ -110,9 +110,16 @@ for file in "${PROFILE_FILES[@]}"; do
     continue
   fi
 
+  resource_type="$(grep -o '"resourceType"[[:space:]]*:[[:space:]]*"[^"]*"' "$path" | head -1 | cut -d'"' -f4)"
   url="$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' "$path" | head -1 | cut -d'"' -f4)"
-  if [[ -z "$url" ]]; then
-    echo "SKIP: $file has no top-level \"url\" field — not the StructureDefinition we expected." >&2
+  # Seen 2026-07-28 against a Docker-hosted server: the file extracted
+  # without error but wasn't a usable FHIR resource, and the resulting
+  # server error gave no clue why. Check explicitly and dump enough of the
+  # actual content to diagnose it next time, instead of a blank error.
+  if [[ "$resource_type" != "StructureDefinition" || -z "$url" ]]; then
+    echo "SKIP: $file didn't contain a usable StructureDefinition." >&2
+    echo "  resourceType found: '$resource_type'  url found: '$url'" >&2
+    echo "  First 300 chars: $(head -c 300 "$path")" >&2
     continue
   fi
 
