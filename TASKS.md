@@ -671,6 +671,64 @@ are hour-tasks or day-tasks. **Answer them before estimating or coding.**
    `patientId`?** Task 41 assumes yes. It should, via the mount-time
    read-back, but verify rather than assume.
 
+### Spike findings (2026-07-28) — all four answered from code, none guessed
+
+**1 & 2 — a "Visits" tab already exists, unfiltered, and does show our
+admission Encounter.** `PatientPageTabs` in `PatientPage.utils.ts` includes
+`{ id: 'encounter', url: 'Encounter?...&patient=%patient.id', label: 'Visits' }`.
+It isn't filtered out — only `dosespot`/`scriptsure` are conditional. The
+`:resourceType` catch-all route (`App.tsx`) renders it via
+`PatientSearchPage`, and a row click goes to the already-routed
+`Encounter/:encounterId` → `EncounterChartPage`. **Verified the search
+actually matches our data**, not assumed: R4's `patient` search parameter
+resolves to `Encounter.subject.where(resolve() is Patient)` (checked
+against `@medplum/definitions`'s own `search-parameters.json`), and our
+admission Encounter sets exactly `subject: { reference: 'Patient/...' }`.
+
+**This changes task 40's shape substantially.** The need it names —
+somewhere to see the admission Encounter — is already met by a stock tab.
+What's actually missing is narrower: the tab is labeled "Visits" among a
+row of ~12 tabs, which isn't an obvious place to look for "the admission
+screening's encounter" if you don't already know the two are the same
+resource. Task 40 is now **small**: confirm it renders acceptably for our
+Encounter (period shows via `period.start`; `serviceType` will be blank
+since we don't set it — a column being blank isn't a bug), and decide
+whether "Visits" needs a hint (copy, or a link from `DjsPatientSummary`
+straight to it) rather than building anything new.
+
+**3 — the real overlap between the two summaries, by name, not
+impression.** `PatientSummary`'s default sections (`getDefaultSections`,
+`@medplum/react`): Demographics, Vitals, Medications, Allergies, Problem
+List, Smoking Status, Sexual Orientation, Insurance, Pharmacies, Labs.
+`DjsPatientSummary`'s sections (grep'd directly): Vitals, Pain, Allergies,
+Chronic conditions, Current medications, Nursing diagnoses, Sign-off.
+
+**Direct duplicates: Vitals, Allergies, Medications** — three sections
+shown twice, which is almost certainly the actual complaint. Chronic
+conditions/Nursing diagnoses likely overlap Problem List too (both are
+Condition-based) — needs a look at what Problem List actually queries
+before counting it as a fourth.
+
+**Unique to Medplum's summary, and what would be LOST under option (b)
+full replacement:** Demographics, Smoking Status, Sexual Orientation,
+Insurance, Pharmacies, Labs (with its "Order Labs" action). That's a real,
+named list now — not a hypothetical risk. **Recommendation given this:
+option (c), deduplicate the overlap, not (b).** Concretely: either drop
+Vitals/Allergies/Medications from the DJS panel and let Medplum's sections
+carry those (since DJS's data already lives in the same resource types
+Medplum's sections query), or keep DJS's richer versions and pass a
+narrowed `sections` list to `PatientSummary` that excludes exactly those
+three (plus Problem List, pending the Condition-query check above).
+DJS-only content (Pain, Sign-off) stays either way — Medplum's summary has
+no way to know about those.
+
+**4 — confirmed, with existing coverage, not just "should work."** 10
+existing tests already drive `renderWizardForPatient(medplum, patient.id)`
+and assert specific fields repopulate (facility, admission date, BP,
+vitals, allergies, etc. — see `AdmissionHealthScreeningWizard.test.tsx`).
+Task 41's assumption holds; no new verification needed before wiring a
+button to it.
+
 ### Then: 36 → 42 → 40 → 41
 
 The order matters, and it isn't the numeric one.
