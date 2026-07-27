@@ -23,17 +23,37 @@ The full data path is built and tested: save → no-duplicate (conditional
 upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
 (read-back) → display (`PatientOverviewPage`).
 
-- **113 DJS unit tests** (`npm test`) — `MockClient` only, no network.
-  Stable across repeated runs.
+- **142 DJS unit tests** (`npm test`) — `MockClient` only, no network.
+  Previously flaky under full-suite CPU contention (a handful would report
+  `Test timed out in 5000ms` under load, not because anything was actually
+  broken); `testTimeout: 20_000` on the `unit` project fixed this —
+  confirmed clean (0 timeouts) on a subsequent full run. Stable across
+  repeated runs now.
 - **Live suite** (`npm run test:live`) — needs a real Medplum server + a
   `ClientApplication`'s id/secret; see `CLAUDE.md` and
   `RUNNING-LIVE-TESTS.md` for setup/troubleshooting. Treat it as the actual
   proof of anything touching the write path — it has repeatedly caught
-  real server-only bugs the unit suite couldn't.
-- Parent-package test suite: ~9 pre-existing failing files (a Vitest/ESM
-  `vi.spyOn`-on-module-export limitation, plus some flaky timeouts under
-  full-suite load) — not ours to fix, don't be alarmed if the count doesn't
-  match exactly run to run.
+  real server-only bugs the unit suite couldn't. All green as of task 43's
+  fallout being fixed (see below).
+- **Parent-package test suite: ~7 failing files, none of them ours.** Two
+  distinct things, not one vague bucket:
+  - A pre-existing Vitest/ESM `vi.spyOn`-on-module-export limitation
+    (`ExportTab.test.tsx`, `notifications.test.ts`) — confirmed present
+    since the start of this project's DJS work, unrelated to anything
+    here.
+  - A newer, distinct regression: `RegisterPage.test.tsx`,
+    `SignInPage.test.tsx`, and `ResourcePage.test.tsx` now fail with
+    `Cannot read properties of undefined (reading 'MEDPLUM_LOGO_URL')`
+    inside `@medplum/react`'s own `Logo.tsx`. Not present earlier in this
+    project's history; best working guess is a transitive `@medplum/*`
+    version shift from a clean `node_modules` reinstall, not yet
+    confirmed or fixed. Don't assume it's the same class as the ESM-spy
+    issue above — it isn't, and it's newer.
+  Don't be alarmed if the exact file/test count drifts slightly run to
+  run — `TaskStatusPanel.test.tsx` in particular has changed *which*
+  assertion it fails on between runs (a Vitest-level timeout on one run,
+  a testing-library `waitFor` failure on another), which points at
+  flakiness rather than a single fixed cause.
 
 ## Resolved (one-liners; see `CLAUDE.md` for anything still load-bearing)
 
@@ -52,7 +72,12 @@ upsert, self-healing on retry) → retract-on-uncheck → resume-on-reopen
   `DjsPatientSummary` + Medplum `PatientSummary` pair (see `CLAUDE.md`).
 - **43** — section Save buttons advance to the next step on a successful
   save only (never on failure — see `CLAUDE.md` bug classes for why that
-  matters).
+  matters). Broke three pre-existing live tests that assumed a section
+  stays active after saving (a field lookup, a checkbox lookup, and —
+  worse — a re-save that silently saved the wrong section instead of
+  failing loudly); all three fixed with an explicit `goToStep()` back to
+  the section, the same pattern already used elsewhere. See the new bug
+  class in `CLAUDE.md`.
 - **36** — every resource type (not just Observation) now links to the
   admission Encounter, or to an explicit `:encounterId` route param when
   embedded (see `CLAUDE.md`).
@@ -159,13 +184,19 @@ Both scripts now print what they found on failure instead of a blank
 error, so a retry should be self-diagnosing. Patient edit stays broken
 until this is picked back up.
 
-**Task 40 — surface the admission Encounter in the UI.** Smaller than it
-looks: a "Visits" tab already exists (`PatientPageTabs`), unfiltered, and
-verified to actually match our admission Encounter (`Encounter.subject`).
-Real work is narrower — decide whether "Visits" needs a hint pointing at
-it, since it's not an obvious place to look for "the admission screening's
-encounter" among ~12 tabs. Do after task 36 (an Encounter nothing points
-to is an empty shell).
+**Task 40 — surface the admission Encounter in the UI. — DONE.** Decision:
+a direct link from `PatientOverviewPage` to the admission Encounter's own
+chart page, rather than a hint on the "Visits" tab label. Reasoning: a
+passive hint still leaves someone hunting through a list of Encounters to
+find the right one, and the tab label is shared across every patient in
+the app, not just ones with a DJS screening — a direct link from where DJS
+staff already look (the Overview page) is both more direct and more
+targeted. `screening.encounters` (already resolved by
+`loadScreeningResources`) is matched via `screeningKey(e) ===
+ADMISSION_ENCOUNTER_KEY`, same lookup pattern the page already uses for
+conditions; the link only renders once that Encounter actually exists, and
+targets its own id — not a guessed path. Tested in
+`PatientOverviewPage.test.tsx`.
 
 **Task 41 — "Start admission screening" / "New encounter" buttons on the
 patient page.** The prepopulate-from-`patientId` path is already proven

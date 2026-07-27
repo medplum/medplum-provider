@@ -366,6 +366,23 @@ set** alongside `verificationStatus: entered-in-error` violates FHIR
 constraints `ait-2`/`con-5`. `clinicalStatus` must be **removed**, not just
 left in place, when retracting those two types.
 
+**A UI behavior change silently invalidates a test's navigation
+assumptions.** Task 43 made a successful save auto-advance to the next
+section — a real, wanted change — and broke three *pre-existing* tests
+that assumed the opposite (that the active section stays put after
+saving). None of them failed loudly and obviously: one couldn't find a
+field, one couldn't find a checkbox, and the worst of the three didn't
+fail at all — it silently re-saved whatever section auto-advance had
+moved to, instead of the section its own comment said it was testing.
+Fix in all three cases was the same: an explicit `goToStep()` back to the
+correct section before the next interaction, the pattern already used
+throughout `AdmissionHealthScreeningWizard.live.test.tsx` and
+`AdmissionHealthScreeningWizard.test.tsx` for exactly this reason. Any
+future change to save/navigation behavior should grep both test files for
+every `saveSection()` call and check what happens immediately after it,
+not just run the suite and see what goes red — the "silently saves the
+wrong thing" failure mode doesn't go red on its own.
+
 ## Verifying a change
 
 **The field-integrity script only sees `FormState` keys.** Sections 1–2

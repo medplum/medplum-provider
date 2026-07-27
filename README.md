@@ -160,7 +160,7 @@ Two things that surprise people:
 ## Testing, and what's actually proven
 
 ```bash
-npm test             # offline suite (MockClient) — 113 DJS tests
+npm test             # offline suite (MockClient) — 142 DJS tests
 npm run test:live    # against a real Medplum server
 ```
 
