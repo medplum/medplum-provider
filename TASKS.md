@@ -502,3 +502,56 @@ stated, not incidental.
 
 Also remove the `preview.html` references in `README.md`, `CLAUDE.md` and
 `CONTRIBUTING.md`, pointing them at the demo route instead.
+
+---
+
+## UI issues found by manual testing (tasks 39–44)
+
+Source: `observed_UI_issues.md`, from a hands-on pass through the running
+app on 2026-07-26. Folded in here by priority; the source file stays as
+the raw record.
+
+Three of the seven were already known or already answered:
+
+- *"Is an encounter being created for the intake?"* — **yes**, since task
+  24 (`58e846b`). That it wasn't discoverable from the UI is the real
+  finding → **task 40**.
+- *"CarePlan's encounter field is empty"* — exactly **task 36**, now
+  confirmed from real use rather than inferred. Priority raised.
+- *"Patient display shows both DJS and regular data"* — this **reverses
+  task 16's deliberate decision** to keep the DJS summary additive. Both
+  positions are defensible; → **task 42**, to be decided explicitly.
+
+### Priority
+
+**High — a broken core workflow**
+
+- **Task 39** — patient edit fails: the server has no
+  `us-core-patient` StructureDefinition. Likely a Medplum project/config
+  gap rather than DJS code; establish that first. **Also a platform
+  finding:** it is direct evidence the server has no US Core profiles
+  loaded, corroborating the CLAUDE.md note that live-test *acceptance is
+  not profile validation* — the server cannot validate against profiles it
+  does not have. Reinforces tasks 26 and 33.
+
+**Medium — workflow gaps that make the app awkward to actually use.**
+Tasks 40, 41 and 42 all touch the patient page and are probably one
+coherent piece of work; task 36 belongs with them.
+
+- **Task 40** — surface the admission Encounter somewhere visible. Check
+  first whether `EncounterChartPage` already exists and simply isn't
+  linked, which would make this navigation rather than new UI.
+- **Task 41** — "Start admission screening" / "New encounter" buttons on
+  the patient page. Settle whether a standalone "new encounter" is a
+  distinct clinical act before building both paths.
+- **Task 42** — consolidate the patient display. Decide what
+  "consolidated" means before editing, and check what Medplum's default
+  sections surface that we don't.
+
+**Low — polish**
+
+- **Task 43** — "Save and next". Easy, with one real trap: advance only
+  on a *successful* save, or a failed save gets hidden behind a page
+  change — the silent-data-loss pattern again.
+- **Task 44** — export date inputs. Establish whether the page is ours or
+  stock `medplum-provider` before patching a vendored file.
