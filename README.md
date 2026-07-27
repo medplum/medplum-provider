@@ -32,6 +32,7 @@ arguably the most valuable output so far.
 | Making UI or design changes | **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — the ways this app breaks silently, plus the code-review checklist |
 | Writing or changing save/read code | **[`CLAUDE.md`](CLAUDE.md)** — invariants, bug classes, platform findings |
 | Wondering what's done or planned, and why | **[`TASKS.md`](TASKS.md)** — source of truth, including the reasoning behind decisions |
+| Making a product or design decision | **[`DECISIONS.md`](DECISIONS.md)** — open questions that block tasks, plus resolved decisions and why they landed where they did |
 
 `CONTRIBUTING.md` is the accessible on-ramp; `CLAUDE.md` is the deeper technical
 reference behind it.
