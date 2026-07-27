@@ -303,7 +303,7 @@ export function PatientOverviewPage(): JSX.Element | null {
         </div>
       </div>
 
-      <p style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 24, display: 'flex', gap: 12 }}>
         <a
           href={`${patientPathPrefix(patient.id)}/admission-screening`}
           onClick={(e) => {
@@ -313,7 +313,14 @@ export function PatientOverviewPage(): JSX.Element | null {
         >
           Open admission screening →
         </a>
-      </p>
+        <button
+          type="button"
+          className="djs-btn"
+          onClick={() => navigate(`/Patient/${patient.id}/Encounter/new`)?.catch(console.error)}
+        >
+          New encounter
+        </button>
+      </div>
 
       <Modal opened={labsModalOpen} onClose={closeLabsModal} size="xl" centered title="Order Labs">
         <OrderLabsPage onSubmitLabOrder={closeLabsModal} />

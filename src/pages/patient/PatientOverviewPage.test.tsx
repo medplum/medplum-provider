@@ -5,7 +5,7 @@ import type { WithId } from '@medplum/core';
 import type { Patient, Resource } from '@medplum/fhirtypes';
 import { MockClient } from '@medplum/mock';
 import { MedplumProvider } from '@medplum/react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { SCREENING_ID_SYSTEM } from '../screeningData';
@@ -249,5 +249,32 @@ describe('PatientOverviewPage', () => {
       await waitFor(() => expect(screen.getByText('2010-01-01')).toBeInTheDocument());
       expect(screen.getByText('female')).toBeInTheDocument();
     });
+  });
+
+  test('New encounter button navigates to the encounter creation modal for this patient', async () => {
+    const navigated: string[] = [];
+    await act(async () => {
+      render(
+        <MantineProvider>
+          <MedplumProvider medplum={medplum}>
+            <MemoryRouter initialEntries={[`/Patient/${patient.id}/overview`]}>
+              <Routes>
+                <Route path="/Patient/:patientId/overview" element={<PatientOverviewPage />} />
+                <Route
+                  path="/Patient/:patientId/Encounter/new"
+                  element={<div data-testid="encounter-new">new encounter page</div>}
+                />
+              </Routes>
+            </MemoryRouter>
+          </MedplumProvider>
+        </MantineProvider>
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText('Demographics')).toBeInTheDocument());
+    const btn = screen.getByRole('button', { name: /new encounter/i });
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByTestId('encounter-new')).toBeInTheDocument());
+    void navigated; // suppress unused-var warning
   });
 });
