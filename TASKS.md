@@ -566,3 +566,96 @@ coherent piece of work; task 36 belongs with them.
   actually do.
 - **Task 44** — export date inputs. Establish whether the page is ours or
   stock `medplum-provider` before patching a vendored file.
+
+---
+
+## Plan: tasks 39–42 (the patient-page cluster)
+
+**Headline: this is not one complicated task. It's one independent fix,
+plus one coherent piece of patient-page work — and a good deal of it may
+be *wiring things that already exist* rather than building.**
+
+### Split task 39 out — it isn't a UI task
+
+Patient edit is broken because the server has no `us-core-patient`
+StructureDefinition. That's Medplum's own page and a server/config
+problem; it shares nothing with 40–42 but the word "patient". Bundling it
+would let a config investigation block UI work, or vice versa.
+
+Do it **first and separately**, and start by identifying which of three it
+is, because the fix differs completely:
+
+1. **Project seed gap** — US Core profiles were never loaded. Fix: load
+   them; add the step to `RUNNING-LIVE-TESTS.md` so the next person's
+   server isn't broken the same way.
+2. **Our setup instructions are incomplete** — same fix, different blame.
+3. **A Medplum defect** — the page requires a profile it doesn't ensure
+   exists. Fix: report upstream, decide whether to work around.
+
+**Do not "fix" this by editing the vendored page.** If it's (1) or (2) the
+page is fine and the environment is wrong.
+
+Whatever the outcome, record the platform finding: a server with no US
+Core profiles **cannot** be validating against them, which is the direct
+confirmation of the "acceptance is not validation" note in `CLAUDE.md`.
+
+### Before touching 40–42: a short discovery spike
+
+Four questions, all cheap to answer, and the answers change whether these
+are hour-tasks or day-tasks. **Answer them before estimating or coding.**
+
+1. **`EncounterChartPage` and `EncounterModal` already exist** and are
+   routed (`App.tsx` ~209–210: `Encounter/new`, `Encounter/:encounterId`).
+   So is task 40 just *"nothing links to them"*? If so it's navigation,
+   not new UI. Likewise task 41's "new encounter" button may be a link to
+   the existing `Encounter/new` modal.
+2. **Is there already an Encounters tab?** `getPatientPageTabs` in
+   `PatientPage.utils` drives `LinkTabs`. If an encounters tab exists and
+   is merely hidden or unrouted, 40 collapses further.
+3. **What does Medplum's `PatientSummary` surface that `DjsPatientSummary`
+   doesn't?** This is the load-bearing question for 42 — see below.
+4. **Does the wizard prepopulate correctly when launched with a
+   `patientId`?** Task 41 assumes yes. It should, via the mount-time
+   read-back, but verify rather than assume.
+
+### Then: 36 → 42 → 40 → 41
+
+The order matters, and it isn't the numeric one.
+
+- **36 first (encounter linkage).** Surfacing an encounter that no
+  Condition, AllergyIntolerance, MedicationStatement or CarePlan points at
+  shows an empty shell — the very complaint that started this. 40's value
+  depends on 36 being done. Carries the stale-closure hazard: thread the
+  reference explicitly like `subject`, never read it from state.
+- **42 next (consolidate the display).** It decides the *container*. Doing
+  40 first would add encounter content to a panel 42 then restructures —
+  rework for no reason.
+- **40 and 41 last**, adding content and actions into a settled structure.
+  They're small once 42 has landed, and may be mostly links.
+
+### The decision 42 needs first
+
+Task 42 **reverses task 16's deliberate choice** to keep `DjsPatientSummary`
+additive alongside Medplum's `PatientSummary`. That was chosen so we
+weren't hiding data the platform surfaces. The user has now used it and
+wants them merged; both positions are reasonable, so decide explicitly and
+write down why.
+
+- **(a) One merged panel** — most work, best result.
+- **(b) DJS replaces the default** — cheapest, and **the risky one**: the
+  original reason for additive was not knowing what we'd be hiding.
+  Question 3 above must be answered before this is on the table.
+- **(c) Keep both, deduplicate the overlap** — smallest change that
+  addresses the actual complaint (seeing the same thing twice).
+
+Recommendation: answer question 3, then choose between (a) and (c). Treat
+(b) as available only if the audit shows the default panel adds nothing.
+
+### One cross-cutting risk
+
+`PatientPage.tsx` is **stock `medplum-provider` that we've already
+modified** (task 16). Every further edit widens the diff against upstream
+and the merge burden that comes with it. Prefer changes that live in our
+own components and touch the vendored page as little as possible — and if
+a change does have to go there, note it, so the divergence is deliberate
+and known rather than discovered later.
